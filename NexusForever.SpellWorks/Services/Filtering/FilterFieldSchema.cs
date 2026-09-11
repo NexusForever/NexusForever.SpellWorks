@@ -56,8 +56,8 @@ namespace NexusForever.SpellWorks.Services.Filtering
         /// Every toggle is phrased positively - <c>Deprecated</c> selects deprecated spells - because a
         /// filter that reads as its own negation cannot be chipped or negated readably. But the useful
         /// reading of both housekeeping toggles is the negative one, so the form seeds them negated and
-        /// the user flips the <c>!</c> to get the other. Which toggles those are is the schema's to say;
-        /// it used to be a key comparison in Razor, which does not survive a second such field.
+        /// the user flips the <c>!</c> to get the other. Which toggles those are is the schema's to say,
+        /// rather than a key comparison in Razor that would have to grow with every such field.
         /// </remarks>
         public bool SeedNegated { get; init; }
 

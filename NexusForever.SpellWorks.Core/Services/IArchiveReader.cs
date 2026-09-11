@@ -20,8 +20,11 @@ namespace NexusForever.SpellWorks.Core.Services
     /// This exists so the table loaders can be exercised without a client installation. The concrete
     /// <c>Nexus.Archive.Archive</c> is sealed off behind here rather than being handed out, because it can
     /// only ever be produced by reading real files off disk.
+    ///
+    /// Disposable because a mount maps the archive file and holds it open. Whoever mounts one releases it
+    /// when it is replaced - see <c>ArchiveService.Initialise</c>.
     /// </remarks>
-    public interface IArchiveReader
+    public interface IArchiveReader : IDisposable
     {
         /// <summary>The file at <paramref name="path"/>, or <c>null</c> when the archive has no such entry.</summary>
         IArchiveFile Find(string path);

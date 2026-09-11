@@ -19,13 +19,21 @@ namespace NexusForever.SpellWorks.Core.Models.Filter.Numeric
         /// <summary>Whether <see cref="Value"/> is a ceiling rather than a floor.</summary>
         public bool AtMost { get; set; }
 
+        /// <summary>
+        /// How far past the bound still counts as on it. Half these columns are floats, so the bound the
+        /// user typed is one the row can only ever be near - see <see cref="NumberTolerance"/>.
+        /// </summary>
+        public double Epsilon { get; set; } = NumberTolerance.Default;
+
         protected abstract double Read(ISpellModel model);
 
         public bool Filter(ISpellModel model)
         {
             double actual = Read(model);
 
-            return AtMost ? actual <= Value : actual >= Value;
+            return AtMost
+                ? NumberTolerance.AtMost(actual, Value, Epsilon)
+                : NumberTolerance.AtLeast(actual, Value, Epsilon);
         }
     }
 }

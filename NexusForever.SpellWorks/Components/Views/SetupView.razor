@@ -1,3 +1,4 @@
+@using System.Globalization
 
 <div class="setup-body">
     <div class="setup-title">Client &amp; archive setup</div>
@@ -112,6 +113,15 @@
                     </label>
                 }
 
+                @* A number, not a toggle: a filter on a float column compares with slack, and an epsilon
+                   nobody can see is one nobody can trust. *@
+                <label class="field wide" data-field="epsilon">
+                    <span class="label">Float compare epsilon</span>
+                    <input class="epsilon mono @(_epsilonDraft != null ? "invalid" : null)"
+                           value="@EpsilonText" @onchange="OnEpsilonChanged"
+                           title="How close a float or double column has to be to the value typed to count as equal to it - relative to the larger of the two, so it holds at any magnitude. 0 demands the bit pattern itself." />
+                </label>
+
                 <div class="setup-foot">
                     <button type="button" class="revert-btn clear-promoted" @onclick="ClearPromoted"
                             disabled="@(PromotedCount == 0)">Clear promoted flex filters</button>
@@ -171,7 +181,7 @@
 
     /// <summary>
     /// What went wrong, in the user's words rather than a state badge. The engine records the reason a load
-    /// failed and nothing used to print it, so a wrong path looked like an empty client.
+    /// failed; without it on screen, a wrong path looks like an empty client.
     /// </summary>
     private string Problem => Ctx.State.ConfigurationError ?? Ctx.Engine.Error;
 
@@ -287,6 +297,48 @@
             ("Text table", info.TextTableName == null ? "—" : $"{info.TextTableName} · {info.TextEntryCount:n0} strings"),
             ("Last read", info.LastRead.ToLocalTime().ToString("HH:mm:ss"))
         ];
+    }
+
+    /// <summary>
+    /// What was typed into the epsilon box and rejected, or null when the box reads the value in use.
+    /// </summary>
+    /// <remarks>
+    /// Kept and marked rather than discarded, which is the stance the filter form takes on a value that
+    /// does not parse: a number that vanished on its way in is one the user cannot see to correct.
+    /// </remarks>
+    private string _epsilonDraft;
+
+    /// <summary>
+    /// The epsilon as the box shows it - the rejected draft if there is one, otherwise the value in use,
+    /// printed in the invariant culture so it reads back as the file holds it rather than as the machine's
+    /// locale would write it.
+    /// </summary>
+    private string EpsilonText => _epsilonDraft ?? Prefs.FilterEpsilon.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Read a new tolerance out of the box.
+    /// </summary>
+    /// <remarks>
+    /// Anything that is not a distance - unreadable, or negative - leaves the one in use alone rather than
+    /// being coerced into something the user did not ask for: a tolerance is the one setting whose wrong
+    /// value quietly widens every filter that reads it.
+    /// </remarks>
+    private void OnEpsilonChanged(ChangeEventArgs e)
+    {
+        string typed = e.Value?.ToString() ?? "";
+
+        if (!double.TryParse(typed, NumberStyles.Float, CultureInfo.InvariantCulture, out double epsilon)
+            // Not finite includes infinity, which "Infinity" and "1e400" both parse to - and which JSON
+            // cannot hold, so accepting it would make every save of the workspace throw.
+            || !double.IsFinite(epsilon) || epsilon < 0)
+        {
+            _epsilonDraft = typed;
+            Ctx.State.Notify();
+            return;
+        }
+
+        _epsilonDraft = null;
+        SetPreference(() => Prefs.FilterEpsilon = epsilon);
     }
 
     private List<(string, Func<bool>, Action<bool>)> PreferenceToggles() =>

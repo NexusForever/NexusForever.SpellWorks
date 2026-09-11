@@ -21,8 +21,10 @@ namespace NexusForever.SpellWorks.Services
         public async Task Run<T>(Func<CancellationToken, Task<T>> work, Func<T, Task> commit)
         {
             Cancel();
-            _cancellation = new CancellationTokenSource();
-            CancellationToken token = _cancellation.Token;
+
+            var cancellation = new CancellationTokenSource();
+            _cancellation = cancellation;
+            CancellationToken token = cancellation.Token;
 
             try
             {
@@ -39,6 +41,24 @@ namespace NexusForever.SpellWorks.Services
             }
             catch (TaskCanceledException)
             {
+            }
+            catch (Exception) when (token.IsCancellationRequested)
+            {
+                // A newer call superseded this one while its work was running, and then the work failed.
+                // That failure is as irrelevant as a result would have been - and letting it escape would hand
+                // the caller an error to act on over the top of the newer call's answer. A failure of the
+                // current call is not swallowed: that one still means something.
+            }
+            finally
+            {
+                // Each run owns its source and releases it - one per keystroke otherwise, each holding the
+                // delay's timer registration. The field is let go first, and only if it is still this run's:
+                // Cancel on a released source throws, and it is called long after a run has finished - by
+                // the exact toggle, and by every component's teardown.
+                if (ReferenceEquals(_cancellation, cancellation))
+                    _cancellation = null;
+
+                cancellation.Dispose();
             }
         }
 

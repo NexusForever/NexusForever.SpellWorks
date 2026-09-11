@@ -424,8 +424,8 @@ a:hover { color: var(--accent-text); }
   min-height: 0;
 }
 
-/* A flex item between two panes, not an overlay: an absolutely positioned seam was clipped by the
-   pane's own overflow:hidden, leaving a sliver that showed the cursor but could not be grabbed. */
+/* A flex item between two panes, not an overlay: an absolutely positioned seam would be clipped by the
+   pane's own overflow:hidden, leaving a sliver that shows the cursor but cannot be grabbed. */
 .pane-splitter {
   flex: none;
   width: 7px;
@@ -1146,7 +1146,7 @@ a:hover { color: var(--accent-text); }
 }
 
 /* A value box keeps a readable width and pushes the buttons onto the next line rather than
-   collapsing - it used to end up 18px wide the moment an operator and a negate button appeared. */
+   collapsing to a sliver once an operator and a negate button sit beside it. */
 .filter-body .field > .control > input,
 .filter-body .field > .control > select {
   flex: 1 1 150px;
@@ -1360,7 +1360,7 @@ a:hover { color: var(--accent-text); }
 
 .add-or-block { height: 28px; }
 
-/* A named-bit picker. Sits where a mask text box used to, and stacks rather than overflowing the card. */
+/* A named-bit picker. Sits in place of a mask text box, and stacks rather than overflowing the card. */
 .bits { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
 
 .bits .bit {

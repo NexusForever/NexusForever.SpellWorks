@@ -294,11 +294,23 @@
 
     // ------------------------------------------------------------------ engine
 
+    /// <summary>
+    /// The start-up load, and what happens once it lands.
+    /// </summary>
+    /// <remarks>
+    /// Reading the archive takes seconds and the window can be closed while the scrim is up, so what
+    /// follows the await has to ask whether there is still a shell to follow it for. Restoring the
+    /// pop-outs is the sharp one: it builds WPF windows, and building a window after the last one closed
+    /// is building it during shutdown.
+    /// </remarks>
     private async Task Boot()
     {
         _booting = true;
         await LoadEngine(Engine.PatchPath);
         _booting = false;
+
+        if (_disposed)
+            return;
 
         RestorePopouts();
         StateHasChanged();
@@ -326,8 +338,15 @@
             _ = InvokeAsync(StateHasChanged);
         });
 
+        // Before the load, not after it: the engine stamps the text table's name and string count into
+        // Info as it finishes, reading them from whichever locale the text service is pointing at. Setting
+        // the preference afterwards would have Setup describe the locale that was current before this load.
+        Text.Locale = State.Preferences.Locale;
+
         await Engine.ReloadAsync(patchPath, progress);
 
+        // Again, now that the tables behind it exist: the setter resolves against what is loaded, and
+        // before the load there was nothing to resolve against.
         Text.Locale = State.Preferences.Locale;
 
         Palette.Rebuild();
@@ -336,6 +355,11 @@
         // A reload can change which tables exist and what columns they carry, which is what the per-column
         // filter fields are built from.
         Schemas.Invalidate();
+
+        // And so the saved filters get their second chance: the workspace is read in App.OnStartup, before
+        // this has ever run, so a condition on one of those columns has no field to resolve against. Panes
+        // the user has since touched are left alone.
+        Store.ReapplyFilters();
         State.PathDraft = Engine.PatchPath;
         _generation++;
 
@@ -541,7 +565,7 @@
 
             case "enter":
                 if (_paletteOpen && _palette != null)
-                    await _palette.Run(_palette.Current, shift);
+                    await _palette.RunCurrent(shift);
                 else if (_ctx.Menu is { Cursor: >= 0 } menu)
                 {
                     MenuItem item = menu.Items.ElementAtOrDefault(menu.Cursor);
@@ -565,6 +589,10 @@
     {
         if (_paletteOpen && _palette != null)
         {
+            // A search still pending would land after this move and put the cursor back on the first hit.
+            if (_palette.Settle())
+                _paletteCursor = 0;
+
             int count = _palette.ResultCount;
             if (count > 0)
                 _paletteCursor = (_paletteCursor + delta + count) % count;
@@ -585,8 +613,13 @@
         _ = InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>Set on teardown, so work still in flight knows there is nothing left to tell.</summary>
+    private bool _disposed;
+
     public void Dispose()
     {
+        _disposed = true;
+
         State.Changed -= OnStateChanged;
         Messenger.UnregisterAll(this);
         _self?.Dispose();

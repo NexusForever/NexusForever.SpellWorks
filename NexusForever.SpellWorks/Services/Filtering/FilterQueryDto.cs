@@ -58,6 +58,10 @@ namespace NexusForever.SpellWorks.Services.Filtering
     /// rendered nor repaired; an <em>unknown operator</em> is coerced to the field's default, which preserves
     /// the intent as closely as anything can; and a <em>value that no longer parses</em> is kept and marked,
     /// because a constraint that silently vanished is worse than one the user can see and fix.
+    ///
+    /// Only <see cref="FilterQuery.MaxGroups"/> clips on the way in. Conditions within a block do not:
+    /// the form creates a condition from typing into any of its fields, so clipping here would lose work
+    /// the user could see themselves do.
     /// </remarks>
     public static class FilterQueryDtoMapper
     {
@@ -93,12 +97,12 @@ namespace NexusForever.SpellWorks.Services.Filtering
             query.IdSearch    = dto.IdSearch ?? "";
             query.ExactSearch = dto.ExactSearch;
 
-            foreach (FilterCondition condition in Read(dto.Common, schema).Take(FilterGroup.MaxConditions))
+            foreach (FilterCondition condition in Read(dto.Common, schema))
                 query.Common.Conditions.Add(condition);
 
             foreach (List<FilterConditionDto> group in (dto.Groups ?? []).Take(FilterQuery.MaxGroups))
             {
-                List<FilterCondition> conditions = Read(group, schema).Take(FilterGroup.MaxConditions).ToList();
+                List<FilterCondition> conditions = Read(group, schema).ToList();
 
                 // A block that lost every condition to a schema change is not a block any more.
                 if (conditions.Count == 0)

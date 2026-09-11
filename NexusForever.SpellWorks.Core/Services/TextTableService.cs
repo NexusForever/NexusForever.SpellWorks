@@ -5,7 +5,16 @@ namespace NexusForever.SpellWorks.Core.Services
 {
     public class TextTableService : ITextTableService
     {
-        private readonly Dictionary<string, TextTable> tables = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>
+        /// The loaded tables, keyed by locale tag.
+        /// </summary>
+        /// <remarks>
+        /// Published by assignment rather than filled in place. The load runs on the thread pool while the
+        /// shell re-renders on its own progress reports, 80 ms apart, and those renders read this - Setup
+        /// lists <see cref="AvailableLocales"/>, and every spell name and tooltip goes through
+        /// <see cref="GetText"/>. Clearing and refilling it underneath them is a dictionary mutated mid-read.
+        /// </remarks>
+        private Dictionary<string, TextTable> tables = new(StringComparer.OrdinalIgnoreCase);
 
         private string locale;
 
@@ -44,7 +53,7 @@ namespace NexusForever.SpellWorks.Core.Services
         /// <summary>
         /// Locale tags actually available in the mounted archives, in load order.
         /// </summary>
-        public IReadOnlyList<string> AvailableLocales => tables.Keys.ToList();
+        public IReadOnlyList<string> AvailableLocales => [.. tables.Keys];
 
         /// <summary>
         /// Number of localised strings in the current table.
@@ -57,19 +66,22 @@ namespace NexusForever.SpellWorks.Core.Services
         /// </summary>
         private TextTable Resolve()
         {
-            if (tables.Count == 0)
+            // Snapshotted once, so a load publishing a new set halfway through cannot be observed here.
+            Dictionary<string, TextTable> loaded = tables;
+
+            if (loaded.Count == 0)
             {
                 tableName = null;
                 return null;
             }
 
-            if (locale != null && tables.TryGetValue(locale, out TextTable match))
+            if (locale != null && loaded.TryGetValue(locale, out TextTable match))
             {
                 tableName = locale + ".bin";
                 return match;
             }
 
-            KeyValuePair<string, TextTable> first = tables.First();
+            KeyValuePair<string, TextTable> first = loaded.First();
             tableName = first.Key + ".bin";
             return first.Value;
         }
@@ -98,7 +110,10 @@ namespace NexusForever.SpellWorks.Core.Services
 
         public async Task Initialise(IProgress<EngineProgress> progress)
         {
-            tables.Clear();
+            // Emptied by publishing an empty one, as at every other write: the previous archive's strings
+            // are gone the moment a load starts, but no reader is ever inside the dictionary while that
+            // happens.
+            tables    = new Dictionary<string, TextTable>(StringComparer.OrdinalIgnoreCase);
             tableName = null;
             count     = 0;
 
@@ -115,10 +130,13 @@ namespace NexusForever.SpellWorks.Core.Services
             TextTable[] loaded = await Task.WhenAll(files.Select(file => LoadTextTable(progress, file, total)));
 
             // Recorded after the load rather than inside it. A dictionary enumerates in insertion order and
-            // Resolve falls back to the first entry, so inserting as each task finished made the fallback
-            // locale - and every unlocalised spell name behind it - whichever table parsed fastest.
+            // Resolve falls back to the first entry, so inserting as each task finishes would make the
+            // fallback locale - and every unlocalised spell name behind it - whichever table parsed fastest.
+            var built = new Dictionary<string, TextTable>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < files.Count; i++)
-                tables[LocaleOf(files[i].Name)] = loaded[i];
+                built[LocaleOf(files[i].Name)] = loaded[i];
+
+            tables = built;
         }
 
         private Task<TextTable> LoadTextTable(IProgress<EngineProgress> progress, IArchiveFile file, int total)
@@ -131,8 +149,11 @@ namespace NexusForever.SpellWorks.Core.Services
                 memoryStream.Position = 0;
 
                 var textTable = new TextTable(memoryStream);
-                Interlocked.Increment(ref count);
-                progress.Report(new EngineProgress(Value: count, Maximum: total));
+
+                // The value the increment returns, not a second read of the field: the locales load in
+                // parallel, and re-reading it would let two finishing together report the same number - or
+                // a later one report a lower one, so the bar goes backwards.
+                progress.Report(new EngineProgress(Value: Interlocked.Increment(ref count), Maximum: total));
 
                 return textTable;
             });

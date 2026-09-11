@@ -14,8 +14,8 @@ namespace NexusForever.SpellWorks.Core.Services
     /// then split each part on <c>&amp;&amp;</c>", so the parse is already disjunctive normal form - the same
     /// shape the filter form's OR blocks have, and it folds through the same composites.
     ///
-    /// Whitespace is <em>not</em> an implicit AND: <c>fire bolt</c> has always matched that literal phrase and
-    /// must keep doing so. A single <c>&amp;</c> or <c>|</c> is likewise ordinary text, since game data is
+    /// Whitespace is <em>not</em> an implicit AND: <c>fire bolt</c> matches that literal phrase. A single
+    /// <c>&amp;</c> or <c>|</c> is likewise ordinary text, since game data is
     /// full of both. Anything that parses to nothing - <c>a &amp;&amp;</c>, <c>|| ||</c>, a lone <c>!</c> -
     /// has its empty terms dropped rather than raising, so incomplete typing degrades to the literal search
     /// it was a moment ago instead of erroring mid-keystroke.
@@ -98,7 +98,7 @@ namespace NexusForever.SpellWorks.Core.Services
 
         /// <summary>
         /// Split on a doubled operator character, leaving a single one as ordinary text - game data is full
-        /// of lone ampersands and pipes, and splitting on those would break searches that work today.
+        /// of lone ampersands and pipes, and splitting on those would break ordinary searches.
         /// </summary>
         private static List<string> SplitOn(string input, char op)
         {

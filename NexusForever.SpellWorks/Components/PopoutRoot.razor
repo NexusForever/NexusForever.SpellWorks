@@ -95,12 +95,17 @@
 
         Messenger.Register<SpellSelectedMessage>(this, (_, _) => _ = InvokeAsync(StateHasChanged));
         Messenger.Register<SpellHyperlinkClicked>(this, (_, _) => _ = InvokeAsync(StateHasChanged));
-        Messenger.Register<SpellResourcesLoaded>(this, (_, _) =>
+        // Everything the handler touches goes through InvokeAsync, not just the render: _generation and
+        // _descriptor are read by this component's markup, and Describe writes into WorkspaceState's own
+        // descriptor cache. The sender happens to be on the dispatcher, but the rule a message handler
+        // has to keep is that it does not touch render state directly.
+        Messenger.Register<SpellResourcesLoaded>(this, (_, _) => _ = InvokeAsync(() =>
         {
             _generation++;
             _descriptor = State.Describe(ViewId);
-            _ = InvokeAsync(StateHasChanged);
-        });
+
+            StateHasChanged();
+        }));
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

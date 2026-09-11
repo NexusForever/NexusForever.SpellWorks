@@ -36,13 +36,16 @@ namespace NexusForever.SpellWorks.Services.Filtering
 
         private readonly ISpellModelService _spellModelService;
         private readonly ITableCatalog _tableCatalog;
+        private readonly Preferences _preferences;
 
         public FilterSchemaRegistry(
             ISpellModelService spellModelService,
-            ITableCatalog tableCatalog)
+            ITableCatalog tableCatalog,
+            Preferences preferences)
         {
             _spellModelService = spellModelService;
             _tableCatalog      = tableCatalog;
+            _preferences       = preferences;
         }
 
         #endregion
@@ -81,6 +84,16 @@ namespace NexusForever.SpellWorks.Services.Filtering
 
         /// <summary>Drop the cached schemas, so a reload's new tables are picked up.</summary>
         public void Invalidate() => _cache.Clear();
+
+        /// <summary>
+        /// The float tolerance every numeric constraint is built with.
+        /// </summary>
+        /// <remarks>
+        /// Read at the moment a condition is compiled rather than when the schema is built, so changing the
+        /// setting takes effect on the next apply instead of needing the schemas thrown away - a cached
+        /// schema holds these factories for the life of the process.
+        /// </remarks>
+        private double Epsilon => _preferences?.FilterEpsilon ?? NumberTolerance.Default;
 
         // ------------------------------------------------------------------ spells
 
@@ -128,8 +141,8 @@ namespace NexusForever.SpellWorks.Services.Filtering
                 Flags<ISpellModel, SpellEffectTargetFlags>(FilterFields.EffectTargetFlags, "Target Flags", effects,
                     (v, mode) => new SpellModelEffectTargetFlagsFilter { Flags = v, Mode = mode }),
 
-                // Both phrased positively; the form seeds them negated, which is the old "hide deprecated"
-                // and its equivalent for the placeholder spells.
+                // Both phrased positively; the form seeds them negated, so switching one on means "hide
+                // deprecated" or "hide the placeholder spells".
                 Toggle<ISpellModel>(FilterFields.Deprecated, "Deprecated", housekeeping,
                     _ => new SpellModelDeprecatedFilter(), seedNegated: true),
 
@@ -249,7 +262,7 @@ namespace NexusForever.SpellWorks.Services.Filtering
                     }),
 
                 Threshold<ISpellEffectModel>(FilterFields.EffectThreat, "Threat", effect, "1.0",
-                    (v, atMost) => new SpellEffectThreatFilter { Value = v, AtMost = atMost }),
+                    (v, atMost) => new SpellEffectThreatFilter { Value = v, AtMost = atMost, Epsilon = Epsilon }),
 
                 Choice<ISpellEffectModel, DamageType>(FilterFields.EffectDamage, "Damage", effect,
                     v => new SpellEffectDamageTypeFilter { DamageType = v }),
@@ -268,7 +281,7 @@ namespace NexusForever.SpellWorks.Services.Filtering
 
                 Choice<ISpellEffectModel, SpellEffectParameterType>(FilterFields.EffectParamType,
                     "Parameter", parameters,
-                    v => new SpellEffectParameterFilter { ParameterType = v }),
+                    v => new SpellEffectParameterFilter { ParameterType = v, Epsilon = Epsilon }),
 
                 Text<ISpellEffectModel>(FilterFields.EffectEmmComparison, "EMM comparison", parameters, "0",
                     FilterOperator.Equals,
@@ -354,10 +367,16 @@ namespace NexusForever.SpellWorks.Services.Filtering
                 Text<ISpellProcModel>(FilterFields.ProcSpellId, "Spell Id", proc, "7161", FilterOperator.StartsWith,
                     c => new SpellProcSpellIdFilter { IdPrefix = FilterValue.Trimmed(c.Value) }),
 
+                // Read into the filter rather than borrowed live. Every other factory here parses the
+                // condition eagerly and keeps the result. Handing the predicate the engine's own key
+                // collection instead would have it walked once per row on the thread pool - so a reload
+                // clearing that dictionary would be a mutated dictionary read mid-lookup, and a filter
+                // compiled before the reload would quietly answer a different question after it.
                 Toggle<ISpellProcModel>(FilterFields.ProcReferenced, "Referenced", proc,
                     _ => new SpellProcReferencedFilter
                     {
-                        ReferencedSpellIds = _spellModelService?.SpellProcReferences.Keys
+                        ReferencedSpellIds = new HashSet<uint>(
+                            _spellModelService?.SpellProcReferences.Keys ?? Enumerable.Empty<uint>())
                     })
             ],
             (term, exact) => new SpellProcTextSearchFilter
@@ -535,7 +554,7 @@ namespace NexusForever.SpellWorks.Services.Filtering
                 [.. columns.Select(column => Column(key, name, title, column))]);
         }
 
-        private static FilterColumnFieldSchema Column(
+        private FilterColumnFieldSchema Column(
             string source, string name, string title, GameTableColumn column)
         {
             return new FilterColumnFieldSchema
@@ -577,10 +596,16 @@ namespace NexusForever.SpellWorks.Services.Filtering
             is TypeCode.SByte or TypeCode.Byte or TypeCode.Int16 or TypeCode.UInt16
             or TypeCode.Int32 or TypeCode.UInt32 or TypeCode.Int64 or TypeCode.UInt64;
 
-        private static Func<FilterCondition, IModelFilter<object>> Number(GameTableColumn column)
+        private Func<FilterCondition, IModelFilter<object>> Number(GameTableColumn column)
         {
             return c => TryValue(c.Value, out double value)
-                ? new ColumnNumberFilter { Read = column.Number, Value = value, Match = Number(c.Operator) }
+                ? new ColumnNumberFilter
+                {
+                    Read    = column.Number,
+                    Value   = value,
+                    Match   = Number(c.Operator),
+                    Epsilon = Epsilon
+                }
                 : null;
         }
 
@@ -721,7 +746,7 @@ namespace NexusForever.SpellWorks.Services.Filtering
         /// A threshold on a decimal-capable value. Distinct from <see cref="Number{T}"/>, which is for the
         /// whole-number columns and keeps their <c>uint</c> parse.
         /// </summary>
-        private static FilterFieldSchema<T> Threshold<T>(
+        private FilterFieldSchema<T> Threshold<T>(
             string key, string label, string card, string placeholder,
             Func<double, bool, IModelFilter<T>> factory)
         {
@@ -743,12 +768,12 @@ namespace NexusForever.SpellWorks.Services.Filtering
         /// A threshold backed by one of the named <see cref="SpellModelRangeFilter"/> subclasses - the whole
         /// of a numeric field's wiring is its type, its key and its label.
         /// </summary>
-        private static FilterFieldSchema<T> Range<T, TFilter>(
+        private FilterFieldSchema<T> Range<T, TFilter>(
             string key, string label, string card, string placeholder)
             where TFilter : SpellModelRangeFilter, IModelFilter<T>, new()
         {
             return Threshold<T>(key, label, card, placeholder,
-                (v, atMost) => new TFilter { Value = v, AtMost = atMost });
+                (v, atMost) => new TFilter { Value = v, AtMost = atMost, Epsilon = Epsilon });
         }
 
         /// <summary>

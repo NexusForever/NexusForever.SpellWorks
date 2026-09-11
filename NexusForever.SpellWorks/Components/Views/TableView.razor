@@ -1,7 +1,9 @@
 @using NexusForever.Game.Static.Spell
 @using NexusForever.SpellWorks.Core.Services
 @using NexusForever.SpellWorks.Services.Filtering
+@using Microsoft.Extensions.Logging
 @implements IDisposable
+@inject ILogger<TableView> Log
 
 <div class="table-view">
     <div class="search-bar">
@@ -163,8 +165,8 @@
     /// Bring the echoed parses back in line with the query.
     /// </summary>
     /// <remarks>
-    /// Parsing only inside the input handlers left the echo blank for every search the pane did not receive
-    /// a keystroke for - one restored from <c>Workspace.json</c>, or simply one the pane still carries after
+    /// Parsing only inside the input handlers would leave the echo blank for every search the pane did not
+    /// receive a keystroke for - one restored from <c>Workspace.json</c>, or simply one the pane still carries after
     /// a trip through the filter form, which builds this component afresh. The box shows the text either
     /// way, so the grammar has to be echoed either way.
     /// </remarks>
@@ -217,13 +219,20 @@
 
     // ------------------------------------------------------------------ column resize
 
+    /// <summary>
+    /// Hand the resize gesture to the module. The column travels as its name as well as its position:
+    /// the position is what JS needs to mutate the right <c>col</c> while the pointer is down, the name is
+    /// what comes back on release - see <see cref="OnColumnResized"/>.
+    /// </summary>
     private async Task BeginColumnResize(PointerEventArgs e, int index, int width)
     {
         if (e.Button != 0 || Ctx.Js == null)
             return;
 
         _self ??= DotNetObjectReference.Create(this);
-        await Ctx.Js.InvokeVoidAsync("beginColumnResize", _tableElement, index, width, e, _self);
+
+        await Ctx.Js.InvokeVoidAsync("beginColumnResize",
+            _tableElement, index, _data.Columns[index].Name, width, e, _self);
     }
 
     /// <summary>
@@ -231,12 +240,16 @@
     /// or narrows the grid - which is what pushes the far columns in or out of the scroller.
     /// </summary>
     [JSInvokable]
-    public void OnColumnResized(int index, int width)
+    public void OnColumnResized(string column, int width)
     {
-        if (index < 0 || index >= _data.Columns.Count)
+        // By name, not by position. The gesture reports once, on release, and the grid can have reprojected
+        // in between - a reload that changes a generic table's columns is how it happens - so the ordinal
+        // the drag started on may name a different column by the time it comes back. A name that is no
+        // longer there is a column the user can no longer see, and is dropped rather than guessed at.
+        if (column == null || !_data.Columns.Any(c => c.Name == column))
             return;
 
-        Ctx.State.SetColumnWidth(Descriptor.Id, _data.Columns[index].Name, width);
+        Ctx.State.SetColumnWidth(Descriptor.Id, column, width);
         Ctx.Store.Save();
 
         StateHasChanged();
@@ -263,17 +276,38 @@
     }
 
     /// <summary>
-    /// Cheap identity for "the row set would differ": view, generation, spell, effect type, and the query.
+    /// Cheap identity for "the row set would differ": view, generation, spell, effect type, the float
+    /// tolerance, the locale, and the query.
     /// </summary>
     /// <remarks>
     /// A string snapshot rather than structural equality, because conditions are edited in place - a captured
     /// query object mutates along with the live one and would never compare unequal. The separator stays
-    /// non-printing, as it was for the flat form, so no value a user can type can forge a boundary.
+    /// non-printing, so no value a user can type can forge a boundary.
+    ///
+    /// The tolerance is in here because it is an input to the comparison rather than to the query: changing
+    /// it in Setup changes which rows a filter already on screen returns, so a grid left holding its old
+    /// answer would be showing the old setting with no way to tell. The locale is here for the same
+    /// reason: a spell's name is read through the text service, so a name search is asked in one language,
+    /// and a grid left holding its answer after a switch shows matches made in the one no longer on screen.
     /// </remarks>
     private string Signature()
     {
-        return string.Join('', Descriptor.Id, Generation, SpellId, EffectType, Filters.Signature());
+        return string.Join('', Descriptor.Id, Generation, SpellId, EffectType,
+            Ctx.State.Preferences.FilterEpsilon, Ctx.Text?.Locale, Filters.Signature());
     }
+
+    /// <summary>
+    /// The projection this grid is showing. Incremented for each one started, so a projection that finishes
+    /// after a newer one has been asked for can tell that it has been superseded.
+    /// </summary>
+    /// <remarks>
+    /// Two can be in flight at once. The typing debounce only ever abandons a reload it has not started yet -
+    /// once the work is running, the newer keystroke cancels a token nothing is watching any more - and
+    /// <see cref="OnParametersSetAsync"/> starts one with no debounce at all. The older projection is
+    /// routinely the slower of the two, because a shorter search term matches more rows, so it can land
+    /// last and must not leave the grid holding rows the search box is no longer asking for.
+    /// </remarks>
+    private int _projection;
 
     private async Task Reload()
     {
@@ -284,7 +318,37 @@
         // One background projection, then one assignment - never append row by row.
         SpellEffectType? effectType = EffectType;
 
-        GridData data = await Task.Run(() => Ctx.Rows.Build(descriptor, query, spell, effectType));
+        int projection = ++_projection;
+
+        GridData data;
+        try
+        {
+            data = await Task.Run(() => Ctx.Rows.Build(descriptor, query, spell, effectType));
+        }
+        catch (Exception exception)
+        {
+            // A projection reads engine state the UI thread can replace under it, so it can fail for
+            // reasons this pane can do nothing about. The rows already on screen were fine, so they stay -
+            // but the signature must not: claiming to be showing a query that never ran is what leaves the
+            // search box and the grid disagreeing with each other for good. Cleared, the next render
+            // retries, and a reload produces one of those immediately.
+            Log.LogWarning(exception, "Projecting {View} failed; keeping the rows that were there.",
+                Descriptor.Id);
+
+            // Only a failure of the projection still being waited for says anything about the signature.
+            // One that was overtaken belongs to a query nobody is asking any more, and the signature now
+            // belongs to the newer projection - clearing it anyway would send the next render back round for
+            // a needless reprojection.
+            if (projection == _projection)
+                _signature = null;
+
+            return;
+        }
+
+        // Superseded while it ran: the grid is already showing - or about to show - a newer answer, and this
+        // one is of a query nobody is asking any more.
+        if (projection != _projection)
+            return;
 
         _data = data;
         StateHasChanged();
@@ -432,9 +496,14 @@
         Ctx.State.Notify();
     }
 
+    /// <summary>
+    /// The remedy the empty state offers. Clears the search boxes alongside the form: the button answers
+    /// "no rows match", and a term in the search box empties the grid exactly as a condition does - so
+    /// resetting only the form would do nothing at all in that case.
+    /// </summary>
     private void ResetFilters()
     {
-        Filters.Reset();
+        Filters.ResetAll();
         Ctx.State.Notify();
     }
 

@@ -17,7 +17,7 @@ namespace NexusForever.SpellWorks.Services
     /// One unit of layout. The same descriptor renders identically in a tab, a split panel or a pop-out window.
     /// </summary>
     /// <remarks>
-    /// Replaces the old <c>BaseTabItem</c>. <see cref="Id"/> is the stable key used for tabs, per-pane state,
+    /// <see cref="Id"/> is the stable key used for tabs, per-pane state,
     /// pinning and layout persistence - <c>"spells"</c>, <c>"detail"</c> … or <c>"tbl:Spell4Effects"</c>.
     /// </remarks>
     public sealed record PaneDescriptor(

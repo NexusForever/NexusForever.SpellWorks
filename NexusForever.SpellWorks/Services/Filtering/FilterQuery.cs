@@ -55,11 +55,15 @@ namespace NexusForever.SpellWorks.Services.Filtering
     /// <summary>
     /// Conditions AND-ed together. One group renders as one block of the form.
     /// </summary>
+    /// <remarks>
+    /// Deliberately uncapped. The form creates conditions in several ways, typing into a field among them,
+    /// and a cap would have to be enforced by every one of them and by the loader alike. A block the user
+    /// could build but not save back is worse than a wide one, and the cost of a wide block is one
+    /// predicate per condition. <see cref="FilterQuery.MaxGroups"/> is capped: a block is drawn in full for
+    /// every OR block there is, so that one bounds the form as well as the compile.
+    /// </remarks>
     public sealed class FilterGroup
     {
-        /// <summary>Cap on conditions in one group, enforced on load and by the form.</summary>
-        public const int MaxConditions = 16;
-
         public List<FilterCondition> Conditions { get; } = [];
 
         public FilterGroup Clone()
@@ -97,8 +101,8 @@ namespace NexusForever.SpellWorks.Services.Filtering
         /// The toolbar's id search, kept apart from <see cref="Search"/>.
         /// </summary>
         /// <remarks>
-        /// One box doing both never worked: a typed number was matched against every description as well, so
-        /// searching for an id dragged in every row whose text happened to contain those digits. Two boxes,
+        /// One box doing both would match a typed number against every description as well, so searching
+        /// for an id would drag in every row whose text happened to contain those digits. Two boxes,
         /// AND-ed, let each be asked precisely - and let the same query ask for an id <em>and</em> a word.
         /// </remarks>
         public string IdSearch { get; set; } = "";
@@ -107,7 +111,7 @@ namespace NexusForever.SpellWorks.Services.Filtering
         /// Whether the two search boxes match a whole value rather than a substring.
         /// </summary>
         /// <remarks>
-        /// Off by default, so every search typed before this existed keeps returning what it did. It governs
+        /// Off by default, so a search matches a substring unless asked otherwise. It governs
         /// both boxes at once: one checkbox that means the same thing wherever it is read.
         /// </remarks>
         public bool ExactSearch { get; set; }
@@ -155,13 +159,13 @@ namespace NexusForever.SpellWorks.Services.Filtering
             if (other == null)
                 return;
 
-            foreach (FilterCondition condition in other.Common.Conditions.Take(FilterGroup.MaxConditions))
+            foreach (FilterCondition condition in other.Common.Conditions)
                 Common.Conditions.Add(condition.Clone());
 
             foreach (FilterGroup group in other.Groups.Take(MaxGroups))
             {
                 var copy = new FilterGroup();
-                foreach (FilterCondition condition in group.Conditions.Take(FilterGroup.MaxConditions))
+                foreach (FilterCondition condition in group.Conditions)
                     copy.Conditions.Add(condition.Clone());
 
                 Groups.Add(copy);

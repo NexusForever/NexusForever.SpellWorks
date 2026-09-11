@@ -108,8 +108,10 @@ namespace NexusForever.SpellWorks.Core.Services
                 memoryStream.Position = 0;
 
                 var gameTable = new GameTable<T>(memoryStream);
-                Interlocked.Increment(ref count);
-                progress.Report(new EngineProgress(Value: count, Maximum: 32));
+
+                // The value the increment returns, as TextTableService reports it. These loads are awaited
+                // one at a time, but reporting the returned value stays correct if they ever run in parallel.
+                progress.Report(new EngineProgress(Value: Interlocked.Increment(ref count), Maximum: 32));
 
                 return gameTable;
             });

@@ -2,6 +2,7 @@
 using NexusForever.Game.Static.Spell;
 using NexusForever.SpellWorks.Core.Messages;
 using NexusForever.SpellWorks.Core.Models;
+using NexusForever.SpellWorks.Core.Models.Filter;
 using NexusForever.SpellWorks.Core.Services;
 
 namespace NexusForever.SpellWorks.Services
@@ -32,6 +33,17 @@ namespace NexusForever.SpellWorks.Services
         public bool RestorePromoted { get; set; } = true;
         public bool MonospaceIds { get; set; } = true;
         public bool RailLabels { get; set; } = true;
+
+        /// <summary>
+        /// How close a float or double column has to be to a typed value to count as equal to it.
+        /// </summary>
+        /// <remarks>
+        /// Relative rather than absolute - see <see cref="NumberTolerance"/>, which is where every numeric
+        /// filter reads it through. Exposed in Setup because the right answer depends on the column being
+        /// asked: the default absorbs the single-to-double conversion and nothing more, while data that is
+        /// only nominally precise wants a looser one and a demand for the bit pattern itself wants zero.
+        /// </remarks>
+        public double FilterEpsilon { get; set; } = NumberTolerance.Default;
     }
 
     public sealed record PopoutEntry(string Key, string ViewId);
@@ -43,9 +55,16 @@ namespace NexusForever.SpellWorks.Services
     public sealed class WorkspaceState
     {
         /// <summary>
-        /// Raised on any mutation. Handlers fire on whichever window's thread mutated the state, so every
-        /// subscriber must marshal through <c>InvokeAsync</c> before touching its render tree.
+        /// Raised on any mutation. Handlers run inline on whoever mutated the state, so every subscriber
+        /// marshals through <c>InvokeAsync</c> before touching its render tree.
         /// </summary>
+        /// <remarks>
+        /// That caller is the one UI thread in every current path: a WPF <c>BlazorWebView</c>
+        /// renders on the WPF dispatcher, and every pop-out window is built on it too, so the windows
+        /// share a thread rather than having one each. The marshalling is kept all the same - it is what
+        /// makes the rule hold for a handler reached from somewhere else, which is exactly what the engine
+        /// load is: its continuation only lands back here because it was started from the dispatcher.
+        /// </remarks>
         public event Action Changed;
 
         public List<string> Open { get; } = ["spells", "detail"];

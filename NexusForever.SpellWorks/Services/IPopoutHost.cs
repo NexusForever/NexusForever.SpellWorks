@@ -19,6 +19,7 @@
 
         void Close(string key);
 
+        /// <summary>Close every pop-out for shutdown, keeping each registered so the workspace saves it.</summary>
         void CloseAll();
     }
 

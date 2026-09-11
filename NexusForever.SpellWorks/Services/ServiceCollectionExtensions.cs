@@ -15,6 +15,10 @@ namespace NexusForever.SpellWorks.Services
         public static IServiceCollection AddSpellWorksWorkspace(this IServiceCollection services)
         {
             services.AddSingleton<WorkspaceState>();
+
+            // The preferences are the workspace's own object, resolved so that the services reading one of
+            // them - the filter schemas and their float tolerance - see the live value rather than a copy.
+            services.AddSingleton(provider => provider.GetRequiredService<WorkspaceState>().Preferences);
             services.AddSingleton<WorkspaceStore>();
             services.AddSingleton<PaletteIndex>();
             services.AddSingleton<FilterSchemaRegistry>();

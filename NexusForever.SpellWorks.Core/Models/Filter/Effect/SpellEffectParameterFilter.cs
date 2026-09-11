@@ -21,6 +21,12 @@ namespace NexusForever.SpellWorks.Core.Models.Filter.Effect
         /// <summary>Whether <see cref="Value"/> is a ceiling rather than a floor.</summary>
         public bool AtMost { get; set; }
 
+        /// <summary>
+        /// How far past the bound still counts as on it. The slots are floats, so the bound the user typed
+        /// is one no slot holds exactly - see <see cref="NumberTolerance"/>.
+        /// </summary>
+        public double Epsilon { get; set; } = NumberTolerance.Default;
+
         public bool Filter(ISpellEffectModel model)
         {
             SpellEffectParameterType[] types = model.Entry?.ParameterType;
@@ -40,7 +46,9 @@ namespace NexusForever.SpellWorks.Core.Models.Filter.Effect
                 if (values == null || i >= values.Length)
                     continue;
 
-                if (AtMost ? values[i] <= threshold : values[i] >= threshold)
+                if (AtMost
+                        ? NumberTolerance.AtMost(values[i], threshold, Epsilon)
+                        : NumberTolerance.AtLeast(values[i], threshold, Epsilon))
                     return true;
             }
 

@@ -9,7 +9,7 @@ namespace NexusForever.SpellWorks.Services
     /// </summary>
     /// <remarks>
     /// A <c>WindowStyle=None</c> window is maximized by the shell to the full monitor rectangle rather than
-    /// the work area, so it covers the taskbar and tears against it. The fix is to answer
+    /// the work area, so it covers the taskbar and tears against it. This answers
     /// <c>WM_GETMINMAXINFO</c> ourselves with the work area of whichever monitor the window is currently on.
     /// </remarks>
     [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]

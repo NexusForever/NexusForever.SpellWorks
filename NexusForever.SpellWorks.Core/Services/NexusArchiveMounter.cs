@@ -41,6 +41,8 @@ namespace NexusForever.SpellWorks.Core.Services
                     .Select(IArchiveFile (entry) => new NexusArchiveFile(archive, entry))
                     .ToList();
             }
+
+            public void Dispose() => archive.Dispose();
         }
 
         private sealed class NexusArchiveFile(Archive archive, IArchiveFileEntry entry) : IArchiveFile

@@ -76,12 +76,22 @@
                 window.Close();
         }
 
+        /// <summary>
+        /// Close every pop-out because the app is quitting, leaving each one registered in the workspace.
+        /// </summary>
+        /// <remarks>
+        /// Each window is let go before it is closed, so its <c>Closed</c> handler finds nothing to remove and
+        /// leaves the workspace alone. Otherwise every window would unregister itself on the way out, exactly
+        /// as though the user had closed it, and the save on exit would record no pop-outs for
+        /// "Restore windows" to bring back.
+        /// </remarks>
         public void CloseAll()
         {
-            foreach (IPopoutWindow window in _open.Values.ToList())
-                window.Close();
-
+            List<IPopoutWindow> windows = [.. _open.Values];
             _open.Clear();
+
+            foreach (IPopoutWindow window in windows)
+                window.Close();
         }
     }
 }

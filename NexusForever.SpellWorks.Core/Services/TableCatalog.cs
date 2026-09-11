@@ -21,9 +21,14 @@ namespace NexusForever.SpellWorks.Core.Services
         // Concurrent, unlike _schemas: that one is filled only by Rebuild, on one thread, while this is
         // read on the filter schema registry's path - and a grid compiles its filter on the thread pool
         // while the component that owns it renders from the same schema. A plain dictionary corrupts
-        // itself when those land together, which is exactly what it did.
+        // itself when those land together.
         private readonly ConcurrentDictionary<Type, IReadOnlyList<GameTableColumn>> _columns = new();
-        private readonly Dictionary<string, TableDescriptor> _byName = new(StringComparer.OrdinalIgnoreCase);
+
+        // The same argument as _columns, answered differently: this one has a single writer - Rebuild, on
+        // the UI thread - and many pool-thread readers, so publishing a finished dictionary by assignment
+        // is enough and costs nothing per lookup. Clearing and refilling it in place would let a grid ask
+        // for its table mid-rebuild and be told there is no such table.
+        private Dictionary<string, TableDescriptor> _byName = new(StringComparer.OrdinalIgnoreCase);
 
         private List<TableDescriptor> _tables = [];
 
@@ -41,7 +46,11 @@ namespace NexusForever.SpellWorks.Core.Services
 
         public TableDescriptor Get(string name)
         {
-            return name != null && _byName.TryGetValue(name, out TableDescriptor descriptor) ? descriptor : null;
+            // Snapshotted, so a rebuild that publishes a new index halfway through this lookup cannot be
+            // observed at all - the same shape PaletteIndex.Search uses.
+            Dictionary<string, TableDescriptor> byName = _byName;
+
+            return name != null && byName.TryGetValue(name, out TableDescriptor descriptor) ? descriptor : null;
         }
 
         public IReadOnlyList<GameTableColumn> Columns(Type entryType)
@@ -111,8 +120,8 @@ namespace NexusForever.SpellWorks.Core.Services
 
         public void Clear()
         {
+            _byName = new Dictionary<string, TableDescriptor>(StringComparer.OrdinalIgnoreCase);
             _tables = [];
-            _byName.Clear();
         }
 
         public void Rebuild()
@@ -148,11 +157,16 @@ namespace NexusForever.SpellWorks.Core.Services
                     values));
             }
 
-            _tables = tables.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            List<TableDescriptor> ordered = tables.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
-            _byName.Clear();
-            foreach (TableDescriptor descriptor in _tables)
-                _byName[descriptor.Name] = descriptor;
+            var byName = new Dictionary<string, TableDescriptor>(StringComparer.OrdinalIgnoreCase);
+            foreach (TableDescriptor descriptor in ordered)
+                byName[descriptor.Name] = descriptor;
+
+            // Both published only once both are complete: a reader holds the previous catalog until the
+            // new one is whole, rather than seeing a list of new tables it cannot yet resolve by name.
+            _byName = byName;
+            _tables = ordered;
         }
 
         private (string[] Columns, Func<object, string[]> Values) GetSchema(Type entryType)

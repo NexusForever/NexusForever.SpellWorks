@@ -34,6 +34,17 @@ namespace NexusForever.SpellWorks.Core.Models.Filter.Column
 
         public NumberMatch Match { get; init; }
 
+        /// <summary>
+        /// How close the column has to be to <see cref="Value"/> to count as equal to it.
+        /// </summary>
+        /// <remarks>
+        /// A float column cannot hold the decimal that was typed, so an exact comparison is the one reading
+        /// of "=" that can never be true. <see cref="NumberTolerance"/> says what the slack is worth; the
+        /// setup exposes it, because how close is close enough belongs to the data rather than to the
+        /// comparison.
+        /// </remarks>
+        public double Epsilon { get; init; } = NumberTolerance.Default;
+
         public bool Filter(object row)
         {
             if (row == null)
@@ -43,11 +54,11 @@ namespace NexusForever.SpellWorks.Core.Models.Filter.Column
 
             return Match switch
             {
-                NumberMatch.AtLeast => actual >= Value,
-                NumberMatch.AtMost  => actual <= Value,
+                NumberMatch.AtLeast => NumberTolerance.AtLeast(actual, Value, Epsilon),
+                NumberMatch.AtMost  => NumberTolerance.AtMost(actual, Value, Epsilon),
                 NumberMatch.MaskAll => Mask(actual, MaskMode.All),
                 NumberMatch.MaskAny => Mask(actual, MaskMode.Any),
-                _                   => actual == Value
+                _                   => NumberTolerance.Equal(actual, Value, Epsilon)
             };
         }
 

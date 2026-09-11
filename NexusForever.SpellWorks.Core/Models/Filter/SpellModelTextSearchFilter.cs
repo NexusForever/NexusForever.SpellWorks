@@ -5,8 +5,8 @@ namespace NexusForever.SpellWorks.Core.Models.Filter
     /// </summary>
     /// <remarks>
     /// Text only. The id is <see cref="SpellModelIdSearchFilter"/>, deliberately a separate box: one box
-    /// doing both meant a typed number was matched against every description as well, so searching an id
-    /// dragged in every spell whose text happened to contain those digits.
+    /// doing both would match a typed number against every description as well, so searching an id would
+    /// drag in every spell whose text happened to contain those digits.
     ///
     /// The name is here because it is what a player actually sees. The unresolved-text sentinel is excluded,
     /// so a missing localisation never becomes a match.

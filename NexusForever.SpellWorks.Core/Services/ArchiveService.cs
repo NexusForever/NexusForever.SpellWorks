@@ -48,8 +48,22 @@ namespace NexusForever.SpellWorks.Core.Services
 
         #endregion
 
+        /// <summary>
+        /// Mount the archives in <see cref="PatchPath"/>, releasing whatever the previous load mounted.
+        /// </summary>
+        /// <remarks>
+        /// A mount maps the archive file and holds it open. Left to the finaliser, a replaced mount would keep
+        /// its file handle and mapping for an unknown while, and an install the user has just pointed away
+        /// from could not be moved or deleted. So it is released here, the moment it is replaced. That is
+        /// safe because nothing reads a mount after its load: every game table and text table is copied
+        /// into memory before the load that read it returns, and this runs inside the engine's load gate.
+        /// </remarks>
         public Task Initialise()
         {
+            MainArchive?.Dispose();
+            foreach (IArchiveReader archive in localisationArchives)
+                archive?.Dispose();
+
             localisationArchives.Clear();
             ArchiveName = null;
             MainArchive = null;

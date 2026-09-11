@@ -83,7 +83,9 @@ function dragSession(onMove, onEnd, cursor) {
         document.removeEventListener('pointercancel', end, true);
         document.body.style.cursor = previousCursor;
         document.body.style.userSelect = '';
-        onEnd(e);
+
+        // A cancelled gesture delivers no click, so the handlers know not to arm one to be swallowed.
+        onEnd(e, e.type !== 'pointercancel');
     };
 
     document.addEventListener('pointermove', move, true);
@@ -91,12 +93,23 @@ function dragSession(onMove, onEnd, cursor) {
     document.addEventListener('pointercancel', end, true);
 }
 
-/** Swallow the click that a completed drag would otherwise deliver to whatever sits under the pointer. */
+/**
+ * Swallow the click that a completed drag would otherwise deliver to whatever sits under the pointer.
+ *
+ * Armed only for the moment the click would arrive in. A `once` listener left waiting for a click that
+ * never comes - a drag cancelled by `pointercancel`, or released where no click follows - would stay
+ * armed indefinitely and eat the user's next unrelated press, which reads as the app ignoring a click.
+ */
 function swallowNextClick() {
-    document.addEventListener('click', e => {
+    const eat = e => {
         e.stopPropagation();
         e.preventDefault();
-    }, { capture: true, once: true });
+    };
+
+    document.addEventListener('click', eat, { capture: true, once: true });
+
+    // The click follows the release in the same task; anything later is not this gesture's.
+    setTimeout(() => document.removeEventListener('click', eat, { capture: true }), 0);
 }
 
 /**
@@ -143,12 +156,13 @@ export function beginSplitDrag(host, index, event, dotnet) {
 
 /**
  * Column resize. The column and the table width are mutated straight on the DOM for the duration of the
- * gesture; .NET hears the final width once, on release, and only if it actually changed.
+ * gesture; .NET hears the final width once, on release, and only if it actually changed - and hears it by
+ * column name, because by then the grid may have reprojected and the index may name something else.
  *
  * The table's width is the sum of its columns, so growing one column grows the table and pushes the far
  * columns further out of the scroller - and shrinking one pulls them back in.
  */
-export function beginColumnResize(table, index, startWidth, event, dotnet) {
+export function beginColumnResize(table, index, column, startWidth, event, dotnet) {
     if (!table) return;
 
     const col = table.querySelectorAll('colgroup > col')[index];
@@ -174,8 +188,9 @@ export function beginColumnResize(table, index, startWidth, event, dotnet) {
             if (grip) grip.classList.remove('resizing');
 
             // A plain click - or the two that make up a double-click reset - must not write an override.
+            // The column goes back by name: the index is only good for as long as the pointer is down.
             if (width !== startWidth)
-                dotnet.invokeMethodAsync('OnColumnResized', index, width);
+                dotnet.invokeMethodAsync('OnColumnResized', column, width);
         },
         'col-resize');
 }
@@ -249,12 +264,12 @@ export function beginTabDrag(strip, viewId, canPin, event, dotnet) {
             if (!pinning)
                 place(e.clientX);
         },
-        e => {
+        (e, clicked) => {
             if (marker) marker.remove();
             if (source) source.classList.remove('dragging');
             if (!armed) return;
 
-            swallowNextClick();
+            if (clicked) swallowNextClick();
 
             if (canPin && overRail(e.clientX, e.clientY))
                 dotnet.invokeMethodAsync('OnPinDropped', viewId, 'pin');
@@ -281,10 +296,10 @@ export function beginPinDrag(key, mode, event, dotnet) {
                 document.body.style.cursor = mode === 'pin' ? 'copy' : 'no-drop';
             }
         },
-        e => {
+        (e, clicked) => {
             if (!armed) return;
 
-            swallowNextClick();
+            if (clicked) swallowNextClick();
 
             const rail = document.querySelector('.rail');
             const over = rail && pointInside(rail.getBoundingClientRect(), e.clientX, e.clientY);

@@ -1,6 +1,8 @@
 @using NexusForever.Game.Static.Spell
 @using NexusForever.SpellWorks.Services.Filtering
+@using Microsoft.Extensions.Logging
 @implements IDisposable
+@inject ILogger<FilterView> Log
 
 <div class="filter-body">
     <div class="chips">
@@ -217,7 +219,7 @@
     /// <summary>The keys of <see cref="Promoted"/>, which the flex cards must not draw a second time.</summary>
     private HashSet<string> PromotedKeys => [.. Pane.Promoted];
 
-    /// <summary>The blocks to draw. A query with none still shows one, which is today's single form.</summary>
+    /// <summary>The blocks to draw. A query with none still shows one, as a single plain form.</summary>
     private List<FilterGroup> Blocks
     {
         get
@@ -247,6 +249,25 @@
     /// apply itself runs, with the same arguments, so the number on the button is the number you get.
     /// </summary>
     private async Task PreviewCount()
+    {
+        try
+        {
+            await Count();
+        }
+        catch (Exception exception)
+        {
+            // The same projection the grid runs, on the same thread pool, so it can fail the same way -
+            // and this one is started fire-and-forget, so a failure has nowhere else to go. The button
+            // drops its promise rather than repeating the count it managed before the form was edited:
+            // a number that is no longer true is worse than no number.
+            Log.LogWarning(exception, "Counting the rows {View} would return failed.", Descriptor.Id);
+
+            _preview = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Count()
     {
         await _previewDebounce.Run(
             token =>
@@ -597,8 +618,8 @@
 
                 // Every toggle is phrased positively - Deprecated selects deprecated spells - but for the
                 // housekeeping ones the useful reading is the negative, so those start negated and switching
-                // one on means "hide these". Which they are is the schema's to say: a key comparison here
-                // was fine for the one, and silently seeds the wrong way round for the second.
+                // one on means "hide these". Which they are is the schema's to say, so a new one needs no
+                // change here.
                 Negate   = field.SeedNegated
             });
         }
@@ -611,8 +632,7 @@
     /// </summary>
     /// <remarks>
     /// Guarded rather than wired selectively: <see cref="Row"/> draws the hand-written fields too, and a
-    /// curated field has no column to promote - it is already one. Right-clicking those does nothing,
-    /// which is what they did before this existed.
+    /// curated field has no column to promote - it is already one. Right-clicking those does nothing.
     /// </remarks>
     private void ColumnMenu(MouseEventArgs e, FilterFieldSchema field)
     {
@@ -661,9 +681,6 @@
 
         if (condition == null)
         {
-            if (group.Conditions.Count >= FilterGroup.MaxConditions)
-                return;
-
             group.Conditions.Add(new FilterCondition { Field = field.Key, Operator = field.DefaultOperator });
         }
         else
@@ -694,9 +711,6 @@
 
     private void AddCondition(FilterFieldSchema field, FilterGroup group)
     {
-        if (group.Conditions.Count >= FilterGroup.MaxConditions)
-            return;
-
         group.Conditions.Add(new FilterCondition { Field = field.Key, Operator = field.DefaultOperator });
         Refresh();
     }

@@ -40,20 +40,38 @@
     private ElementReference _element;
     private ContextMenuModel _placedModel;
 
+    /// <summary>
+    /// Measure the menu and clamp it inside the viewport.
+    /// </summary>
+    /// <remarks>
+    /// Two JS round trips, and the menu can be dismissed or replaced across either of them: Escape, a press
+    /// anywhere in the shell, the window losing focus and choosing an item all null <c>Ctx.Menu</c>, and a
+    /// second right-click puts a different model in its place. So the model is captured once and checked
+    /// again on the way back. Reading the parameter afterwards would write the clamped position onto
+    /// whatever is there by then: either nothing at all (a null reference out of a render lifecycle
+    /// method, which is fatal to the render tree) or the next menu, stamped with this one's coordinates
+    /// and marked placed before it has been measured.
+    /// </remarks>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // Clamping is ours now - the browser will happily paint a menu off-screen.
-        if (Model == null || Model.Placed || Ctx?.Js == null || ReferenceEquals(_placedModel, Model))
+        ContextMenuModel model = Model;
+
+        if (model == null || model.Placed || Ctx?.Js == null || ReferenceEquals(_placedModel, model))
             return;
 
-        _placedModel = Model;
+        _placedModel = model;
 
         var size = await Ctx.Js.InvokeAsync<Size>("measure", _element);
-        var position = await Ctx.Js.InvokeAsync<Point>("menuPosition", Model.X, Model.Y, size.Width, size.Height);
+        var position = await Ctx.Js.InvokeAsync<Point>("menuPosition", model.X, model.Y, size.Width, size.Height);
 
-        Model.X = position.X;
-        Model.Y = position.Y;
-        Model.Placed = true;
+        // The menu this measurement belongs to is gone, or is no longer the one on screen.
+        if (!ReferenceEquals(model, Model))
+            return;
+
+        model.X = position.X;
+        model.Y = position.Y;
+        model.Placed = true;
 
         StateHasChanged();
     }

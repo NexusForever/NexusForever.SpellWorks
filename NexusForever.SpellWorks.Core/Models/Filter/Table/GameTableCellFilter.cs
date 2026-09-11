@@ -5,7 +5,7 @@ namespace NexusForever.SpellWorks.Core.Models.Filter.Table
     /// </summary>
     /// <remarks>
     /// The column is an index resolved against the table's descriptor at construction, not a name matched
-    /// per row - the same lookup the projection used to do inline, hoisted out of the loop. A negative index
+    /// per row, so the lookup happens once rather than inside the loop. A negative index
     /// means the table has no such column, and the constraint then matches nothing rather than everything:
     /// a mask the table cannot answer is not a mask it satisfies.
     /// </remarks>

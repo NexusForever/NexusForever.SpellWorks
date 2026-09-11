@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using NexusForever.SpellWorks.Core.Models.Filter;
 using NexusForever.SpellWorks.Services.Filtering;
 
 namespace NexusForever.SpellWorks.Services
@@ -56,6 +57,25 @@ namespace NexusForever.SpellWorks.Services
         private Dictionary<string, FilterQueryDto> _unreadFilters;
         private Dictionary<string, List<string>> _unreadPromoted;
 
+        /// <summary>
+        /// The filters section exactly as the last <see cref="Load"/> read it, and the signature each scope's
+        /// query carried once that load had applied it.
+        /// </summary>
+        /// <remarks>
+        /// Both exist because a filter can name something only the archive can describe - a generic table's
+        /// per-column fields - and the workspace is read before the archive is: <c>App.OnStartup</c> loads it,
+        /// and the shell is what mounts the client. A condition on one of those columns resolved against a
+        /// schema that has no columns yet, so without these it would be dropped as an unknown key and then
+        /// written back out of the file on exit, and a column filter would not survive a single restart.
+        ///
+        /// The signature is what makes that repairable without ever overwriting the user: a scope whose query
+        /// still matches what the load left behind has not been touched since, so the file's version of it is
+        /// still authoritative - both for <see cref="ReapplyFilters"/> and for what <see cref="SaveFilters"/>
+        /// writes back. A scope the user has edited is theirs, and the file's version of it is stale.
+        /// </remarks>
+        private Dictionary<string, FilterQueryDto> _loadedFilters;
+        private readonly Dictionary<string, string> _appliedSignatures = [];
+
         private readonly string _workspacePath;
         private readonly string _configurationPath;
 
@@ -107,6 +127,10 @@ namespace NexusForever.SpellWorks.Services
             catch (Exception)
             {
                 // A corrupt workspace file is not worth failing startup over - fall back to the defaults.
+                // But it is worth keeping: the file that would not parse holds the only copy of every
+                // filter, pin and column width the user had, and the first save of this session is about
+                // to write defaults over it.
+                Keep();
                 return;
             }
 
@@ -144,11 +168,23 @@ namespace NexusForever.SpellWorks.Services
                 _state.Preferences.RailLabels      = snapshot.Preferences.RailLabels;
                 _state.Preferences.RestoreFilters  = snapshot.Preferences.RestoreFilters;
                 _state.Preferences.RestorePromoted = snapshot.Preferences.RestorePromoted;
+
+                // A tolerance that is not a distance reads as the default rather than as itself: it is typed
+                // into a box and then written to a file anybody can hand-edit, and a negative one would make
+                // every float comparison answer everything.
+                _state.Preferences.FilterEpsilon = Distance(snapshot.Preferences.FilterEpsilon);
             }
 
             if (snapshot.ColumnWidths != null)
+                // A null entry is skipped rather than copied: this runs in App.OnStartup, outside the parse's
+                // try, so it would keep the app from starting at all.
                 foreach ((string viewId, Dictionary<string, int> widths) in snapshot.ColumnWidths)
-                    _state.ColumnWidths[viewId] = new Dictionary<string, int>(widths);
+                    if (widths != null)
+                        _state.ColumnWidths[viewId] = new Dictionary<string, int>(widths);
+
+            // Kept whatever happens next, so a condition the load cannot resolve yet is neither lost on the
+            // way out nor beyond repair once the archive has been read.
+            _loadedFilters = snapshot.Filters;
 
             // Read after the preferences block above, so the switch that governs these is the one the file
             // carries rather than the default it was constructed with. Both gate the load and not the
@@ -208,7 +244,13 @@ namespace NexusForever.SpellWorks.Services
                 if (!live.Contains(scope))
                     continue;
 
-                if (FilterQueryDtoMapper.ToDto(pane.Filters) is { } dto)
+                // A pane still as the load left it is written as it was read, not as it was resolved. The
+                // two differ only where the load could not resolve a condition - a column of a table the
+                // archive had not been read for yet - and writing the resolved version back would delete it
+                // from the file for good.
+                if (Untouched(scope, pane) && _loadedFilters.TryGetValue(scope, out FilterQueryDto read))
+                    filters[scope] = read;
+                else if (FilterQueryDtoMapper.ToDto(pane.Filters) is { } dto)
                     filters[scope] = dto;
             }
 
@@ -220,6 +262,15 @@ namespace NexusForever.SpellWorks.Services
 
             return filters.Count > 0 ? filters : null;
         }
+
+        /// <summary>
+        /// Whether <paramref name="pane"/>'s filter is still exactly what the last <see cref="Load"/> left
+        /// there, and so whether the file's own version of it is still the better one.
+        /// </summary>
+        private bool Untouched(string scope, PaneState pane) =>
+            _loadedFilters != null
+            && _appliedSignatures.TryGetValue(scope, out string applied)
+            && pane.Filters.Signature() == applied;
 
         /// <summary>The scopes a pane is still reachable through, and so still worth persisting.</summary>
         private HashSet<string> LiveScopes() =>
@@ -299,13 +350,61 @@ namespace NexusForever.SpellWorks.Services
                 try
                 {
                     FilterSchema schema = _schemas.For(_state.Describe(scope));
-                    FilterQueryDtoMapper.Load(_state.PaneStateFor(scope).Filters, dto, schema);
+                    FilterQuery query = _state.PaneStateFor(scope).Filters;
+
+                    FilterQueryDtoMapper.Load(query, dto, schema);
+
+                    // What this pane looks like having been loaded and nothing else, so a later read can
+                    // tell "still as the file left it" from "the user has since said otherwise".
+                    _appliedSignatures[scope] = query.Signature();
                 }
                 catch (Exception)
                 {
                 }
             }
         }
+
+        /// <summary>
+        /// Apply the saved filters again, now that the archive has been read.
+        /// </summary>
+        /// <remarks>
+        /// Called by the shell once a load finishes, which is the first moment a generic table's per-column
+        /// fields exist at all - see <see cref="_loadedFilters"/> for why they do not at start-up. Only panes
+        /// the user has not touched since the load are rewritten: reapplying is a repair of what the load
+        /// could not resolve, never a second opinion on what the user has done since.
+        /// </remarks>
+        public void ReapplyFilters()
+        {
+            if (_loadedFilters == null || !_state.Preferences.RestoreFilters)
+                return;
+
+            foreach ((string scope, FilterQueryDto dto) in _loadedFilters)
+            {
+                if (!_appliedSignatures.TryGetValue(scope, out string applied))
+                    continue;
+
+                if (_state.PaneStateFor(scope).Filters.Signature() != applied)
+                    continue;
+
+                try
+                {
+                    FilterSchema schema = _schemas?.For(_state.Describe(scope));
+                    FilterQuery query = _state.PaneStateFor(scope).Filters;
+
+                    FilterQueryDtoMapper.Load(query, dto, schema);
+                    _appliedSignatures[scope] = query.Signature();
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        /// <summary>
+        /// A tolerance as a distance: anything that is not one reads as the default.
+        /// </summary>
+        private static double Distance(double epsilon) =>
+            !double.IsFinite(epsilon) || epsilon < 0 ? NumberTolerance.Default : epsilon;
 
         /// <summary>
         /// Rewrite <c>PatchPath</c> in <c>Configuration.json</c>, leaving any other keys untouched.
@@ -332,17 +431,74 @@ namespace NexusForever.SpellWorks.Services
             TryWrite(_configurationPath, root.ToJsonString(options));
         }
 
-        private static void TryWrite(string path, string content)
+        /// <summary>
+        /// Set aside a workspace file that could not be read, and say so where the user will see it.
+        /// </summary>
+        /// <remarks>
+        /// Setup already prints <see cref="WorkspaceState.ConfigurationError"/>, so it is the one place a
+        /// start-up problem is reported. An error already there - <c>Configuration.json</c> failing, which
+        /// is the more urgent of the two, because nothing loads without it - is left alone.
+        /// </remarks>
+        private void Keep()
         {
+            string kept = Path.Combine(Path.GetDirectoryName(_workspacePath) ?? "", "Workspace.corrupt.json");
+
             try
             {
-                File.WriteAllText(path, content);
+                File.Copy(_workspacePath, kept, overwrite: true);
+            }
+            catch (Exception)
+            {
+                // Nothing more can be done for it; the message below is still worth showing.
+            }
+
+            _state.ConfigurationError ??=
+                $"Workspace.json could not be read and was not applied. It has been kept as {kept}.";
+        }
+
+        /// <summary>
+        /// Write <paramref name="content"/> so that the file on disk is never a half-written one.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="File.WriteAllText(string, string)"/> truncates and then writes, so anything that
+        /// stops the process in between - and the save on exit races the process going away by
+        /// construction - leaves a torn file, and a file that will not parse means starting from defaults.
+        /// A temp file swapped in cannot be observed half-written at all.
+        /// </remarks>
+        private static void TryWrite(string path, string content)
+        {
+            // Named for this process. Nothing stops the app being started twice, and both copies write the
+            // same directory: with one shared temp name, each could install the other's content, or find
+            // the other's temp file open and lose its own save without a word.
+            string temporary = $"{path}.{Environment.ProcessId}.tmp";
+
+            try
+            {
+                File.WriteAllText(temporary, content);
+
+                if (File.Exists(path))
+                    File.Replace(temporary, path, destinationBackupFileName: null);
+                else
+                    File.Move(temporary, path);
             }
             catch (IOException)
             {
                 // Read-only install directory; the workspace is a convenience, not a requirement.
+                Discard(temporary);
             }
             catch (UnauthorizedAccessException)
+            {
+                Discard(temporary);
+            }
+        }
+
+        private static void Discard(string path)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception)
             {
             }
         }
