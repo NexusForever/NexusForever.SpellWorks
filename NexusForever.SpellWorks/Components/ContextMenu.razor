@@ -1,0 +1,88 @@
+﻿@implements IDisposable
+
+@if (Model != null)
+{
+    <div class="menu fade" @ref="_element"
+         style="left:@(Model.X.ToString(Culture))px;top:@(Model.Y.ToString(Culture))px;visibility:@(Model.Placed ? "visible" : "hidden")"
+         @onmousedown:stopPropagation="true"
+         @oncontextmenu:preventDefault="true"
+         @oncontextmenu:stopPropagation="true">
+        <div class="menu-head">
+            <div class="title">@Model.Title</div>
+            <div class="sub">@Model.Sub</div>
+        </div>
+        <div class="menu-items">
+            @for (int i = 0; i < Model.Items.Count; i++)
+            {
+                MenuItem item = Model.Items[i];
+                int index = i;
+                <button type="button"
+                        class="menu-item @(Model.Cursor == index ? "cursor" : null)"
+                        @onclick="() => Invoke(item)"
+                        @onmouseenter="() => Model.Cursor = index">
+                    <i class="@item.Icon"></i>@item.Label
+                    <span class="flex"></span>
+                    <span class="hint">@item.Hint</span>
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Culture = System.Globalization.CultureInfo.InvariantCulture;
+
+    [CascadingParameter] public ShellContext Ctx { get; set; }
+
+    [Parameter] public ContextMenuModel Model { get; set; }
+    [Parameter] public EventCallback Closed { get; set; }
+
+    private ElementReference _element;
+    private ContextMenuModel _placedModel;
+
+    /// <summary>
+    /// Measure the menu and clamp it inside the viewport.
+    /// </summary>
+    /// <remarks>
+    /// Two JS round trips, and the menu can be dismissed or replaced across either of them: Escape, a press
+    /// anywhere in the shell, the window losing focus and choosing an item all null <c>Ctx.Menu</c>, and a
+    /// second right-click puts a different model in its place. So the model is captured once and checked
+    /// again on the way back. Reading the parameter afterwards would write the clamped position onto
+    /// whatever is there by then: either nothing at all (a null reference out of a render lifecycle
+    /// method, which is fatal to the render tree) or the next menu, stamped with this one's coordinates
+    /// and marked placed before it has been measured.
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Clamping is ours now - the browser will happily paint a menu off-screen.
+        ContextMenuModel model = Model;
+
+        if (model == null || model.Placed || Ctx?.Js == null || ReferenceEquals(_placedModel, model))
+            return;
+
+        _placedModel = model;
+
+        var size = await Ctx.Js.InvokeAsync<Size>("measure", _element);
+        var position = await Ctx.Js.InvokeAsync<Point>("menuPosition", model.X, model.Y, size.Width, size.Height);
+
+        // The menu this measurement belongs to is gone, or is no longer the one on screen.
+        if (!ReferenceEquals(model, Model))
+            return;
+
+        model.X = position.X;
+        model.Y = position.Y;
+        model.Placed = true;
+
+        StateHasChanged();
+    }
+
+    private async Task Invoke(MenuItem item)
+    {
+        item.Invoke();
+        await Closed.InvokeAsync();
+    }
+
+    public void Dispose() => _placedModel = null;
+
+
+}

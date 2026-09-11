@@ -1,0 +1,542 @@
+@using NexusForever.Game.Static.Spell
+@using NexusForever.SpellWorks.Core.Services
+@using NexusForever.SpellWorks.Services.Filtering
+@using Microsoft.Extensions.Logging
+@implements IDisposable
+@inject ILogger<TableView> Log
+
+<div class="table-view">
+    <div class="search-bar">
+        @* Two boxes, not one. A single box matched a typed number against the descriptions as well, so
+           asking for an id dragged in every row whose text happened to contain those digits. *@
+        <div class="search-field text" data-search="text">
+            <i class="ph ph-magnifying-glass"></i>
+            <input value="@Filters.Search" @oninput="OnTextSearch" size="1" placeholder="@TextPlaceholder" />
+        </div>
+
+        @if (Schema is { HasIdSearch: true })
+        {
+            <div class="search-field id" data-search="id">
+                <i class="ph ph-hash"></i>
+                <input value="@Filters.IdSearch" @oninput="OnIdSearch" size="1" placeholder="@IdPlaceholder" />
+            </div>
+        }
+
+        <label class="exact-toggle @(Filters.ExactSearch ? "on" : null)"
+               title="Match the whole value rather than any part of it">
+            <input type="checkbox" checked="@Filters.ExactSearch" @onchange="OnExactChanged" />
+            <span>Exact</span>
+        </label>
+
+        @* The parse is otherwise invisible, so echo it back - the text-side equivalent of what the OR
+           blocks do for the form. *@
+        @foreach ((string box, SearchExpression parsed) in new[] { ("text", _search), ("id", _idSearch) })
+        {
+            if (Echoes(parsed))
+            {
+                <div class="search-terms" data-search="@box">
+                    @for (int g = 0; g < parsed.Groups.Count; g++)
+                    {
+                        if (g > 0)
+                        {
+                            <span class="chip-or">OR</span>
+                        }
+
+                        @foreach (SearchTerm term in parsed.Groups[g])
+                        {
+                            <span class="chip term @(term.Negate ? "not" : null)">@(term.Negate ? "not " : "")@term.Text</span>
+                        }
+                    }
+                </div>
+            }
+        }
+        <span class="row-count">@_data.Rows.Length.ToString("n0") / @_data.Total.ToString("n0") rows</span>
+        <div class="pane-flex"></div>
+        <button type="button" class="outline-btn" @onclick="OpenFilter">
+            <i class="ph ph-sliders-horizontal"></i>Filter
+        </button>
+    </div>
+
+    <div class="grid-scroll">
+        @{
+            // Resolved once per render rather than per cell: a wide game table has 100+ columns.
+            int[] widths = Widths();
+        }
+
+        @* The width has to be stated for table-layout:fixed to apply at all - see GridData.TotalWidth. *@
+        <table class="grid" style="width:@(widths.Sum())px" @ref="_tableElement">
+            <colgroup>
+                @for (int i = 0; i < _data.Columns.Count; i++)
+                {
+                    <col style="width:@(widths[i])px" />
+                }
+            </colgroup>
+            <thead>
+                <tr>
+                    @for (int i = 0; i < _data.Columns.Count; i++)
+                    {
+                        int index = i;
+                        GridColumn column = _data.Columns[index];
+
+                        <th title="@column.Name">
+                            @column.Name
+                            <span class="col-grip" title="Drag to resize · double-click to reset"
+                                  @onpointerdown="e => BeginColumnResize(e, index, widths[index])"
+                                  @ondblclick="() => ResetColumn(column.Name)"
+                                  @ondblclick:stopPropagation="true"></span>
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @* ItemSize matches the real 26px row: 5px+5px padding plus the 1px rule. *@
+                <Virtualize Items="_data.Rows" ItemSize="26" OverscanCount="8" SpacerElement="tr" Context="row">
+                    @* Click count comes off the event: WPF's DragMove loop and WebView2 between them make
+                       a delegated dblclick unreliable, and MouseEventArgs.Detail is the same signal. *@
+                    <tr class="@(IsSelected(row) ? "sel" : null)"
+                        @onclick="e => Click(e, row)"
+                        @oncontextmenu:preventDefault="true"
+                        @oncontextmenu:stopPropagation="true"
+                        @oncontextmenu="e => Menu(e, row)">
+                        @for (int i = 0; i < row.Cells.Length && i < _data.Columns.Count; i++)
+                        {
+                            <td class="@_data.Columns[i].CellClass" title="@row.Cells[i]">@row.Cells[i]</td>
+                        }
+                    </tr>
+                </Virtualize>
+            </tbody>
+        </table>
+
+        @if (_data.Rows.Length == 0)
+        {
+            <div class="empty-state">
+                @if (NoArchive)
+                {
+                    <i class="ph ph-plug"></i>
+                    <span>@ArchiveText</span>
+                    <button type="button" @onclick="OpenSetup">Open Setup</button>
+                }
+                else if (NoEffectType)
+                {
+                    <i class="ph ph-crosshair"></i>
+                    <span>No effect type selected — pick a row in the Effect Types browser</span>
+                    <button type="button" @onclick="OpenEffectTypes">Open Effect Types</button>
+                }
+                else
+                {
+                    <i class="ph ph-funnel-x"></i>
+                    <span>No rows match this filter set</span>
+                    <button type="button" @onclick="ResetFilters">Reset filters</button>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public ShellContext Ctx { get; set; }
+
+    [Parameter] public PaneDescriptor Descriptor { get; set; }
+    [Parameter] public string Scope { get; set; }
+    [Parameter] public PaneState Pane { get; set; }
+
+    /// <summary>The spell this pane is showing - the Effects and Procs views project from it.</summary>
+    [Parameter] public uint SpellId { get; set; }
+
+    /// <summary>Bumped whenever the engine reloads, so every open grid reprojects.</summary>
+    [Parameter] public int Generation { get; set; }
+
+    /// <summary>The effect type an Effect Type spells pane is listing; null for every other kind.</summary>
+    [Parameter] public SpellEffectType? EffectType { get; set; }
+
+    private FilterQuery Filters => Pane.Filters;
+
+    private FilterSchema Schema => Ctx.Schemas?.For(Descriptor);
+
+    /// <summary>Each box as parsed, echoed back under it so the grammar is not invisible.</summary>
+    private SearchExpression _search = SearchExpression.Empty;
+    private SearchExpression _idSearch = SearchExpression.Empty;
+
+    /// <summary>The text each parse above was taken from, so a query changed elsewhere re-parses.</summary>
+    private string _parsedSearch = "";
+    private string _parsedIdSearch = "";
+
+    /// <summary>
+    /// Bring the echoed parses back in line with the query.
+    /// </summary>
+    /// <remarks>
+    /// Parsing only inside the input handlers would leave the echo blank for every search the pane did not
+    /// receive a keystroke for - one restored from <c>Workspace.json</c>, or simply one the pane still carries after
+    /// a trip through the filter form, which builds this component afresh. The box shows the text either
+    /// way, so the grammar has to be echoed either way.
+    /// </remarks>
+    private void SyncParse()
+    {
+        if (_parsedSearch != Filters.Search)
+        {
+            _parsedSearch = Filters.Search;
+            _search       = SearchExpression.Parse(_parsedSearch);
+        }
+
+        if (_parsedIdSearch != Filters.IdSearch)
+        {
+            _parsedIdSearch = Filters.IdSearch;
+            _idSearch       = SearchExpression.Parse(_parsedIdSearch);
+        }
+    }
+
+    /// <summary>
+    /// Whether a parse is worth showing: a single plain term reads the same as what was typed, so echoing
+    /// it back would be noise.
+    /// </summary>
+    private static bool Echoes(SearchExpression parsed) =>
+        parsed.Groups.Count > 1
+        || (parsed.Groups.Count == 1 && (parsed.Groups[0].Count > 1 || parsed.Groups[0][0].Negate));
+
+    private GridData _data = GridData.Empty;
+    private string _signature;
+    private readonly Debounce _debounce = new(TimeSpan.FromMilliseconds(150));
+
+    private ElementReference _tableElement;
+    private DotNetObjectReference<TableView> _self;
+
+    // What each box invites the user to type is the schema's to say, alongside what a term in it means.
+    private string TextPlaceholder => Schema?.TextPlaceholder ?? "Search…";
+
+    private string IdPlaceholder => Schema?.IdPlaceholder ?? "Id…";
+
+    /// <summary>Per-column widths for this render, with any user resize applied.</summary>
+    private int[] Widths()
+    {
+        string viewId = Descriptor.Id;
+        var widths = new int[_data.Columns.Count];
+
+        for (int i = 0; i < widths.Length; i++)
+            widths[i] = Ctx.State.ColumnWidth(viewId, _data.Columns[i]);
+
+        return widths;
+    }
+
+    // ------------------------------------------------------------------ column resize
+
+    /// <summary>
+    /// Hand the resize gesture to the module. The column travels as its name as well as its position:
+    /// the position is what JS needs to mutate the right <c>col</c> while the pointer is down, the name is
+    /// what comes back on release - see <see cref="OnColumnResized"/>.
+    /// </summary>
+    private async Task BeginColumnResize(PointerEventArgs e, int index, int width)
+    {
+        if (e.Button != 0 || Ctx.Js == null)
+            return;
+
+        _self ??= DotNetObjectReference.Create(this);
+
+        await Ctx.Js.InvokeVoidAsync("beginColumnResize",
+            _tableElement, index, _data.Columns[index].Name, width, e, _self);
+    }
+
+    /// <summary>
+    /// Called once, on release. The table's own width is the sum of its columns, so a resize also widens
+    /// or narrows the grid - which is what pushes the far columns in or out of the scroller.
+    /// </summary>
+    [JSInvokable]
+    public void OnColumnResized(string column, int width)
+    {
+        // By name, not by position. The gesture reports once, on release, and the grid can have reprojected
+        // in between - a reload that changes a generic table's columns is how it happens - so the ordinal
+        // the drag started on may name a different column by the time it comes back. A name that is no
+        // longer there is a column the user can no longer see, and is dropped rather than guessed at.
+        if (column == null || !_data.Columns.Any(c => c.Name == column))
+            return;
+
+        Ctx.State.SetColumnWidth(Descriptor.Id, column, width);
+        Ctx.Store.Save();
+
+        StateHasChanged();
+    }
+
+    private void ResetColumn(string column)
+    {
+        Ctx.State.ResetColumnWidth(Descriptor.Id, column);
+        Ctx.Store.Save();
+
+        StateHasChanged();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        SyncParse();
+
+        string signature = Signature();
+        if (signature == _signature)
+            return;
+
+        _signature = signature;
+        await Reload();
+    }
+
+    /// <summary>
+    /// Cheap identity for "the row set would differ": view, generation, spell, effect type, the float
+    /// tolerance, the locale, and the query.
+    /// </summary>
+    /// <remarks>
+    /// A string snapshot rather than structural equality, because conditions are edited in place - a captured
+    /// query object mutates along with the live one and would never compare unequal. The separator stays
+    /// non-printing, so no value a user can type can forge a boundary.
+    ///
+    /// The tolerance is in here because it is an input to the comparison rather than to the query: changing
+    /// it in Setup changes which rows a filter already on screen returns, so a grid left holding its old
+    /// answer would be showing the old setting with no way to tell. The locale is here for the same
+    /// reason: a spell's name is read through the text service, so a name search is asked in one language,
+    /// and a grid left holding its answer after a switch shows matches made in the one no longer on screen.
+    /// </remarks>
+    private string Signature()
+    {
+        return string.Join('', Descriptor.Id, Generation, SpellId, EffectType,
+            Ctx.State.Preferences.FilterEpsilon, Ctx.Text?.Locale, Filters.Signature());
+    }
+
+    /// <summary>
+    /// The projection this grid is showing. Incremented for each one started, so a projection that finishes
+    /// after a newer one has been asked for can tell that it has been superseded.
+    /// </summary>
+    /// <remarks>
+    /// Two can be in flight at once. The typing debounce only ever abandons a reload it has not started yet -
+    /// once the work is running, the newer keystroke cancels a token nothing is watching any more - and
+    /// <see cref="OnParametersSetAsync"/> starts one with no debounce at all. The older projection is
+    /// routinely the slower of the two, because a shorter search term matches more rows, so it can land
+    /// last and must not leave the grid holding rows the search box is no longer asking for.
+    /// </remarks>
+    private int _projection;
+
+    private async Task Reload()
+    {
+        PaneDescriptor descriptor = Descriptor;
+        FilterQuery query = Filters.Clone();
+        ISpellModel spell = Ctx.State.Spell(SpellId);
+
+        // One background projection, then one assignment - never append row by row.
+        SpellEffectType? effectType = EffectType;
+
+        int projection = ++_projection;
+
+        GridData data;
+        try
+        {
+            data = await Task.Run(() => Ctx.Rows.Build(descriptor, query, spell, effectType));
+        }
+        catch (Exception exception)
+        {
+            // A projection reads engine state the UI thread can replace under it, so it can fail for
+            // reasons this pane can do nothing about. The rows already on screen were fine, so they stay -
+            // but the signature must not: claiming to be showing a query that never ran is what leaves the
+            // search box and the grid disagreeing with each other for good. Cleared, the next render
+            // retries, and a reload produces one of those immediately.
+            Log.LogWarning(exception, "Projecting {View} failed; keeping the rows that were there.",
+                Descriptor.Id);
+
+            // Only a failure of the projection still being waited for says anything about the signature.
+            // One that was overtaken belongs to a query nobody is asking any more, and the signature now
+            // belongs to the newer projection - clearing it anyway would send the next render back round for
+            // a needless reprojection.
+            if (projection == _projection)
+                _signature = null;
+
+            return;
+        }
+
+        // Superseded while it ran: the grid is already showing - or about to show - a newer answer, and this
+        // one is of a query nobody is asking any more.
+        if (projection != _projection)
+            return;
+
+        _data = data;
+        StateHasChanged();
+    }
+
+    private async Task OnTextSearch(ChangeEventArgs e)
+    {
+        Filters.Search = e.Value?.ToString() ?? "";
+        SyncParse();
+
+        await SearchChanged();
+    }
+
+    private async Task OnIdSearch(ChangeEventArgs e)
+    {
+        Filters.IdSearch = e.Value?.ToString() ?? "";
+        SyncParse();
+
+        await SearchChanged();
+    }
+
+    /// <summary>
+    /// Whole-value matching, across both boxes at once so the checkbox means one thing.
+    /// </summary>
+    /// <remarks>
+    /// Applied without the typing debounce: it is a click, not a keystroke, and waiting on it reads as lag.
+    /// </remarks>
+    private async Task OnExactChanged(ChangeEventArgs e)
+    {
+        Filters.ExactSearch = e.Value is bool exact && exact;
+
+        _debounce.Cancel();
+        _signature = Signature();
+
+        await Reload();
+    }
+
+    private async Task SearchChanged()
+    {
+        await _debounce.Run(async () =>
+        {
+            _signature = Signature();
+            await Reload();
+        });
+    }
+
+    private bool IsSelected(GridRow row)
+    {
+        return Descriptor.Kind == PaneKind.Spell4 && row.Key == Ctx.State.SelectedSpellId;
+    }
+
+    private void Click(MouseEventArgs e, GridRow row)
+    {
+        if (e.Detail >= 2)
+            Activate(row);
+        else
+            Select(row);
+    }
+
+    private void Select(GridRow row)
+    {
+        Ctx.CloseMenu();
+
+        switch (row.Source)
+        {
+            case ISpellModel spell:
+                Ctx.State.Select(spell.Id);
+                break;
+            case ISpellProcModel proc:
+                Ctx.State.Select(proc.SpellId);
+                break;
+            case EffectTypeUsage usage:
+                Ctx.State.SelectEffectType(usage.Type);
+                break;
+            case TableDescriptor table:
+                Ctx.State.SelectView(PaneDescriptor.GameTableId(table.Name));
+                break;
+        }
+    }
+
+    private void Activate(GridRow row)
+    {
+        switch (row.Source)
+        {
+            case ISpellModel spell:
+                Ctx.OpenDetail(spell.Id, null, false);
+                break;
+            case ISpellEffectModel:
+                Ctx.OpenDetail(SpellId, DetailSubTab.Effects, false);
+                break;
+            case ISpellProcModel proc:
+                Ctx.OpenDetail(proc.SpellId, DetailSubTab.Spell, false);
+                break;
+            case EffectTypeUsage usage:
+                Ctx.OpenEffectTypeSpells(usage.Type, false);
+                break;
+            case TableDescriptor table:
+                Ctx.State.SelectView(PaneDescriptor.GameTableId(table.Name));
+                break;
+            default:
+                _ = Ctx.Copy(string.Join('\t', row.Cells));
+                break;
+        }
+    }
+
+    private void Menu(MouseEventArgs e, GridRow row)
+    {
+        switch (row.Source)
+        {
+            case ISpellModel spell:
+                Ctx.ShowMenu(e.ClientX, e.ClientY, spell.Description,
+                    $"Spell4 · {spell.Id} · Tier {spell.Entry.TierIndex}", Ctx.SpellMenu(spell, Scope));
+                break;
+
+            case ISpellEffectModel effect:
+                Ctx.ShowMenu(e.ClientX, e.ClientY, effect.Type.ToString(),
+                    $"Spell4Effects · idx {row.Key}", Ctx.EffectMenu(effect, SpellId, Scope));
+                break;
+
+            case ISpellProcModel proc:
+                Ctx.ShowMenu(e.ClientX, e.ClientY, $"Proc → spell {proc.SpellId}",
+                    $"Proc type {(uint)proc.ProcType}", Ctx.ProcMenu(proc));
+                break;
+
+            case EffectTypeUsage usage:
+                Ctx.ShowMenu(e.ClientX, e.ClientY, usage.Type.ToString(),
+                    $"Effect type {(uint)usage.Type} · {usage.SpellIds.Count:n0} spells", Ctx.EffectTypeMenu(usage));
+                break;
+
+            case TableDescriptor table:
+                Ctx.ShowMenu(e.ClientX, e.ClientY, table.Name + ".tbl",
+                    $"{table.RowCount:n0} rows · {table.Columns.Count} columns", Ctx.TableMenu(table));
+                break;
+
+            default:
+                Ctx.ShowMenu(e.ClientX, e.ClientY, $"{Descriptor.TableName}.tbl · row {row.Cells.FirstOrDefault()}",
+                    $"{_data.Columns.Count} columns", Ctx.GenericRowMenu(Descriptor, row));
+                break;
+        }
+    }
+
+    private void OpenFilter()
+    {
+        Pane.Mode = PaneMode.Filter;
+        Ctx.State.Notify();
+    }
+
+    /// <summary>
+    /// The remedy the empty state offers. Clears the search boxes alongside the form: the button answers
+    /// "no rows match", and a term in the search box empties the grid exactly as a condition does - so
+    /// resetting only the form would do nothing at all in that case.
+    /// </summary>
+    private void ResetFilters()
+    {
+        Filters.ResetAll();
+        Ctx.State.Notify();
+    }
+
+    /// <summary>
+    /// Whether an empty grid means "no client archive" rather than "your filters exclude everything". The
+    /// two look identical on screen and only one of them is the user's doing.
+    /// </summary>
+    private bool NoArchive => Ctx.Engine.State != EngineState.Ready;
+
+    private string ArchiveText => Ctx.Engine.State switch
+    {
+        EngineState.Failed  => "The client archive could not be read",
+        EngineState.Loading => "Reading the client archive…",
+        _                   => "No client archive loaded"
+    };
+
+    /// <summary>
+    /// Whether this pane is empty because nothing has been picked in the Effect Types browser yet, rather
+    /// than because the filters exclude everything - the two look identical and only one is the user's doing.
+    /// </summary>
+    private bool NoEffectType => Descriptor.Kind == PaneKind.EffectTypeSpells && EffectType == null;
+
+    private void OpenEffectTypes() => Ctx.State.SelectView(PaneDescriptor.EffectTypes.Id);
+
+    private void OpenSetup()
+    {
+        Ctx.State.IsBrowsing = true;
+        Ctx.State.SelectView(PaneDescriptor.Setup.Id);
+    }
+
+    public void Dispose()
+    {
+        _debounce.Dispose();
+        _self?.Dispose();
+    }
+}

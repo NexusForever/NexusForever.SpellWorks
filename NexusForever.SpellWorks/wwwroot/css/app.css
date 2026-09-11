@@ -1,0 +1,1779 @@
+/* Every rule reads var(--...) from tokens.css. Dark only; there is no theme switcher. */
+
+html, body {
+  /* Dark only, so every UA-painted surface - scrollbars, select popups, spin buttons - follows suit. */
+  color-scheme: dark;
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+* { box-sizing: border-box; }
+
+button { font-family: inherit; cursor: pointer; }
+select, input { font-family: inherit; }
+a { color: var(--accent-link); text-decoration: none; }
+a:hover { color: var(--accent-text); }
+
+::selection { background: var(--selection); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-focus); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* The square where a horizontal and a vertical scrollbar meet is painted by the UA and defaults to a
+   light system colour - it shows up on any table wide enough to need both bars. */
+::-webkit-scrollbar-corner { background: transparent; }
+
+.mono { font-family: var(--font-mono); }
+
+/* Selection is re-enabled only where reading the value is the point. */
+.grid td, .kv-value, .data-cell-value, input, .detail-title { user-select: text; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fade { animation: none !important; }
+}
+
+/* ---------------------------------------------------------------- shell */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--w-rail) 1fr;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ----------------------------------------------------------------- rail */
+
+.rail {
+  width: var(--w-rail);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 7px;
+  background: var(--chrome);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  z-index: 2;
+}
+
+.rail-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  margin-bottom: 10px;
+  color: var(--accent);
+  font-size: 20px;
+}
+
+.rail-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: none;
+  padding: 0 3px;
+  height: 48px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.rail.compact .rail-item { height: 38px; }
+
+.rail-item:hover { background: var(--accent-tint); color: var(--accent-text); }
+
+.rail-item.active {
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.rail-item.setup { color: var(--text-muted); }
+.rail-item.setup.active { color: var(--accent-text); }
+
+.rail-item i { font-size: 19px; line-height: 1; }
+
+.rail-item span {
+  font-size: 8px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.15;
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-item .dot {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-icon);
+}
+
+.rail-divider {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  margin: 7px 1px 4px;
+}
+
+.rail-divider span:first-child { flex: 1; height: 1px; background: linear-gradient(to right, transparent, var(--border-strong)); }
+.rail-divider span:last-child  { flex: 1; height: 1px; background: linear-gradient(to left,  transparent, var(--border-strong)); }
+
+.rail-divider .label {
+  flex: none;
+  font-size: 7.5px;
+  letter-spacing: .12em;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.rail-pinned {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.rail-pinned .rail-item span { text-transform: none; letter-spacing: .04em; }
+
+.rail-spacer { flex: 1 1 auto; min-height: 10px; }
+.rail-gap { flex: none; height: 8px; }
+
+/* --------------------------------------------------------------- header */
+
+.header {
+  height: var(--h-header);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 12px 0 14px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  color: var(--text);
+}
+
+.header-divider { flex: none; width: 1px; height: 16px; background: var(--border-strong); }
+
+.archive-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 60px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.archive-path i { font-size: 13px; color: var(--accent-deep); flex: none; }
+
+/* Tail-truncate: the folder tail is the informative half. */
+.archive-path .path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.table-count {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 4 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.table-count .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-icon); flex: none; }
+.table-count span:last-child { overflow: hidden; text-overflow: ellipsis; }
+
+.header-flex { flex: 1 1 0; min-width: 8px; }
+
+.jump-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  white-space: nowrap;
+  height: 26px;
+  padding: 0 8px 0 9px;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+
+.jump-btn:hover { border-color: var(--accent-border); color: var(--accent-text); }
+.jump-btn i { font-size: 13px; }
+
+.kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font-size: 9px;
+  font-family: var(--font-mono);
+}
+
+.segmented {
+  display: flex;
+  align-items: center;
+  flex: none;
+  padding: 2px;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+}
+
+.segmented button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+  height: 20px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.segmented button:hover { color: var(--accent-text); }
+.segmented button.on { background: var(--accent-tint-2); color: var(--text); }
+.segmented button i { font-size: 13px; }
+
+.accent-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+  height: 26px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.accent-btn:hover { background: var(--accent-tint); }
+.accent-btn:active { background: var(--accent-tint-2); }
+.accent-btn i { font-size: 14px; }
+
+/* ------------------------------------------------------------ tab strip */
+
+.tabstrip {
+  position: relative;
+  height: var(--h-tabstrip);
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 5px 8px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  user-select: none;
+}
+
+/* Insertion point during a reorder. Positioned against the strip's padding box, so it is offset by
+   scrollLeft in JS rather than tracking the scroller here. */
+.tab-drop-marker {
+  position: absolute;
+  top: 4px;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: var(--h-tab);
+  border-radius: 7px 7px 0 0;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  background: var(--chrome);
+  color: var(--text-dim);
+}
+
+.tab { cursor: grab; }
+.tab.dragging { opacity: .45; }
+
+.tab.active {
+  border-color: var(--border-strong);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.tab-select {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 100%;
+  padding: 0 4px 0 10px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tab-select i { font-size: 14px; opacity: .85; }
+
+.badge {
+  padding: 1px 5px;
+  background: var(--accent-tint-2);
+  border-radius: 9px;
+  font-size: 9.5px;
+  color: var(--accent-text);
+  font-family: var(--font-mono);
+}
+
+.tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 5px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.tab-close:hover { background: var(--border-strong); color: var(--text); }
+
+/* ----------------------------------------------------------- pane frame */
+
+.panes {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  background: var(--border);
+}
+
+.pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--pane);
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A flex item between two panes, not an overlay: an absolutely positioned seam would be clipped by the
+   pane's own overflow:hidden, leaving a sliver that shows the cursor but cannot be grabbed. */
+.pane-splitter {
+  flex: none;
+  width: 7px;
+  z-index: 3;
+  cursor: col-resize;
+
+  /* A hairline seam painted in the middle of a grabbable 7px band; it thickens under the pointer. */
+  background: linear-gradient(var(--border), var(--border)) center / 1px 100% no-repeat, var(--pane);
+}
+
+.pane-splitter:hover,
+.pane-splitter.dragging {
+  background: linear-gradient(var(--accent), var(--accent)) center / 3px 100% no-repeat, var(--pane);
+}
+
+.pane-head {
+  height: var(--h-pane-head);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 8px 0 12px;
+  background: var(--pane-head);
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-head > i { flex: none; font-size: 15px; color: var(--accent-icon); }
+
+.pane-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.pane-meta {
+  flex: 0 3 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.pane-flex { flex: 1 1 0; min-width: 0; }
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.icon-btn:hover { border-color: var(--accent-border); color: var(--accent-text); }
+.icon-btn:disabled { color: var(--text-disabled); cursor: default; }
+.icon-btn:disabled:hover { border-color: var(--border-strong); color: var(--text-disabled); }
+.icon-btn.on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-text); }
+
+/* ------------------------------------------------------------- sub tabs */
+
+.subtabs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 8px 0 14px;
+  height: var(--h-subtabs);
+  background: var(--subbar);
+  border-bottom: 1px solid var(--border);
+}
+
+.subtab {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  height: var(--h-subtabs);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -.01em;
+  color: var(--text-muted);
+}
+
+.subtab:hover { color: var(--accent-text); }
+.subtab.active { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+
+.subtabs .meta {
+  flex: 0 3 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.subtabs .icon-btn { width: 26px; height: 22px; }
+
+/* ---------------------------------------------------------- table  view */
+
+.table-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+.search-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 10px;
+  background: var(--subbar);
+  border-bottom: 1px solid var(--border);
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 34px;
+  min-width: 34px;
+  max-width: 340px;
+  height: 26px;
+  padding: 0 9px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+}
+
+.search-field i { flex: none; font-size: 13px; color: var(--text-muted); }
+
+/* The two boxes ask different questions, so they do not read as one control split in half. The text
+   box is the wide one and keeps the plain treatment; the id box is narrow, monospaced and tinted,
+   the same way an id column is set apart from a description column in the grid itself. */
+.search-field.text { flex: 1 1 34px; max-width: 340px; }
+
+.search-field.id {
+  flex: 0 1 148px;
+  min-width: 74px;
+  max-width: 168px;
+  background: var(--accent-tint);
+  border-color: var(--accent-border);
+}
+
+.search-field.id i { color: var(--accent-text); }
+
+.search-field.id input {
+  font-family: var(--font-mono);
+  color: var(--accent-text);
+}
+
+.search-field.id input::placeholder { color: var(--text-muted); }
+
+/* Whole-value matching. Off by default, so every search typed before it existed still returns what it
+   did; it governs both boxes, so the checkbox means one thing wherever it is read. */
+.exact-toggle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  user-select: none;
+}
+
+.exact-toggle:hover { border-color: var(--accent-border); color: var(--accent-text); }
+
+.exact-toggle.on {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.exact-toggle input { width: 12px; height: 12px; margin: 0; accent-color: var(--accent); }
+
+/* Each box echoes its own parse, so which box was clever is never in doubt. */
+.search-terms[data-search="id"] .chip { font-family: var(--font-mono); }
+
+.search-field input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.row-count {
+  flex: 0 3 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.outline-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+  height: 26px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+
+.outline-btn:hover { border-color: var(--accent-border); color: var(--accent-text); }
+.outline-btn i { font-size: 13px; }
+
+/* Radius lives on the pane; the scroller stays square so it is not clipped per frame. */
+.grid-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+
+/* The table carries its own width inline (the sum of the column widths), so it overflows the pane and
+   the scroller pans sideways - wide game tables have far more columns than fit. min-width keeps a narrow
+   table filling the pane instead. Do NOT move a width back in here as auto: table-layout:fixed is
+   ignored for an auto-width table, and the automatic algorithm re-measures cells as rows scroll by. */
+.grid {
+  min-width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.grid th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 6px 10px;
+  background: var(--raised-alt);
+  border-bottom: 1px solid var(--border-strong);
+  text-align: left;
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-label);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--row-rule);
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The header is sticky, so it already establishes a containing block for the grip. */
+.col-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.col-grip::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  right: 3px;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.grid th:hover .col-grip::after,
+.col-grip.resizing::after {
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+.grid td.num { font-size: 11px; font-family: var(--font-mono); color: var(--text-dim); }
+.grid td.id  { font-size: 11px; font-family: var(--font-mono); color: var(--text); }
+.grid td.dim { color: var(--text-dim); }
+
+.grid tr { cursor: pointer; }
+.grid tbody tr:hover { background: var(--raised-alt); }
+
+/* A box-shadow edge, not a border - a border would shift the row. */
+.grid tbody tr.sel { background: var(--accent-tint); box-shadow: inset 2px 0 0 var(--accent); }
+
+.empty-state {
+  position: sticky;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 44px 0;
+  color: var(--text-faint);
+}
+
+.empty-state i { font-size: 26px; }
+.empty-state span { font-size: 12px; }
+
+.empty-state button {
+  margin-top: 4px;
+  padding: 4px 11px;
+  background: transparent;
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+  color: var(--accent-text);
+  font-size: 11px;
+}
+
+.empty-state button:hover { background: var(--accent-tint); }
+
+/* --------------------------------------------------------- detail  view */
+
+.scroll-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px 20px; }
+
+.detail-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+
+.detail-title { font-size: 19px; font-weight: 500; letter-spacing: -.01em; }
+.detail-sub { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+
+.cards { display: flex; flex-direction: column; gap: 11px; }
+
+.card {
+  background: var(--pane);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* The head is the card's fold control, so it is a real button - a caret that only looks clickable is a
+   dead affordance. The button reset keeps it looking exactly like the bar it replaced. */
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--raised-alt);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: inherit;
+  text-align: left;
+}
+
+.card-head:hover { background: var(--accent-tint); }
+
+.card.collapsed .card-head { border-bottom: none; }
+
+.card-head i { font-size: 12px; color: var(--accent-icon); }
+
+.card-head .title {
+  font-size: 10.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-mid);
+  font-weight: 600;
+}
+
+.card-head .meta { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+
+.card-body {
+  padding: 9px 12px 11px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 2px 18px;
+}
+
+.kv {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--row-rule);
+  min-width: 0;
+}
+
+.kv-key { flex: none; width: 104px; font-size: 10.5px; color: var(--text-dim); text-align: right; }
+
+.kv-value {
+  font-size: 11.5px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-btn {
+  flex: none;
+  padding: 1px 6px;
+  background: transparent;
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  color: var(--accent-link);
+  font-size: 9.5px;
+  font-family: var(--font-mono);
+}
+
+.link-btn:hover { background: var(--accent-tint); }
+
+.data-strip { padding: 0 12px 12px; }
+
+.data-strip-label {
+  font-size: 9.5px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.data-cells {
+  display: flex;
+  gap: 1px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.data-cell { flex: 1; min-width: 74px; background: var(--subbar); }
+
+.data-cell-head {
+  padding: 3px 7px;
+  background: var(--raised-alt);
+  font-size: 9px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-cell-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  font-size: 11px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------- filter  view */
+
+.filter-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 20px; }
+
+.chips { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+
+.chips-label { font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--text-muted); }
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-border);
+  border-radius: 20px;
+  color: var(--accent-text);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+}
+
+.chip:hover { background: var(--accent-tint-2); }
+.chip i { font-size: 10px; }
+
+.chips .none { font-size: 10.5px; color: var(--text-faint); font-style: italic; }
+.chips .flex { flex: 1; }
+
+.reset-btn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+
+.reset-btn:hover { border-color: var(--accent-border); color: var(--accent-text); }
+
+.filter-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 14px; }
+
+.group-card {
+  background: var(--pane);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 11px 12px 13px;
+}
+
+.group-head { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+
+.tick { width: 3px; height: 11px; background: var(--accent); border-radius: 2px; flex: none; }
+
+.group-title {
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-label);
+  font-weight: 600;
+}
+
+.fields { display: flex; flex-direction: column; gap: 8px; }
+
+.field { display: flex; align-items: center; gap: 8px; }
+.field > span.label { flex: none; width: 82px; font-size: 10.5px; color: var(--text-dim); text-align: right; }
+.field.wide > span.label { width: 104px; }
+
+/* .flex-row rides along on the same control styling: a flex card's boxes are the same controls, laid
+   out a row per constraint rather than a row per field. */
+.field select,
+.field input,
+.flex-row select,
+.flex-row input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.field input,
+.flex-row input { padding: 0 8px; font-family: var(--font-mono); }
+
+/* The native dropdown list is OS chrome and cannot be themed; the closed control can. */
+.field select,
+.flex-row select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='%239397ab'><path d='M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80A8 8 0 0 1 48 88h160a8 8 0 0 1 5.66 13.66z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 11px;
+  padding-right: 22px;
+}
+
+.toggle {
+  padding: 3px 11px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.toggle.on { border-color: var(--accent); background: var(--accent-tint); color: var(--accent-text); }
+
+.filter-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.apply-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 13px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent-text);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.apply-btn:hover { background: var(--accent-tint); }
+.apply-btn:active { background: var(--accent-tint-2); }
+.apply-btn i { font-size: 13px; }
+
+.filter-foot .hint { font-size: 10.5px; color: var(--text-muted); }
+
+/* Boolean filter: the OR rule between blocks, the band that applies across them, and the extra
+   condition rows a field can stack. Everything else is the single-value form, unchanged. */
+
+.or-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 1px;
+}
+
+.or-divider::before,
+.or-divider::after { content: ""; flex: 1; height: 1px; }
+.or-divider::before { background: linear-gradient(to right, transparent, var(--border-strong)); }
+.or-divider::after  { background: linear-gradient(to left,  transparent, var(--border-strong)); }
+
+.or-divider span {
+  flex: none;
+  font-size: 8.5px;
+  letter-spacing: .14em;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.common-band {
+  background: var(--pane);
+  border: 1px dashed var(--accent-border);
+  border-radius: 8px;
+  padding: 9px 12px 12px;
+  margin-bottom: 14px;
+}
+
+.common-band > .group-head { margin-bottom: 9px; }
+
+/* --- the filter form's own sizing -------------------------------------------------------------
+   Everything below is scoped to .filter-body: Setup shares .field / .fields / .label and must keep
+   the plain single-column layout.
+
+   The rule the whole layout follows: a control is given the room it needs to be read, and what
+   cannot fit beside it wraps - first the buttons under their value box, then a card onto the next
+   line. Nothing is squeezed to make a neighbour fit. */
+
+/* Cards size to their content and wrap, rather than every card being forced into one rigid column
+   width whatever it holds. */
+.filter-body .filter-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.filter-body .group-card {
+  flex: 1 1 auto;
+  min-width: min(100%, 268px);
+  max-width: 100%;
+  padding: 0 0 11px;
+  border-color: var(--border-strong);
+  overflow: hidden;
+}
+
+/* A tinted, ruled head, so which fields belong to which group reads at a glance. */
+.filter-body .group-card > .group-head {
+  margin: 0;
+  padding: 7px 11px;
+  background: var(--accent-tint);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.group-count {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-faint);
+  font-size: 9px;
+  font-family: var(--font-mono);
+}
+
+/* Label beside control, with one label column per card sized to that card's longest label - so a
+   long column name widens its own card instead of clipping or running over its neighbour. */
+.filter-body .fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 8px;
+}
+
+.filter-body .group-card > .fields { padding: 11px 12px 0; }
+
+/* The label and the control drop into the card's two columns; the label element itself carries no box. */
+.filter-body .field { display: contents; }
+
+.filter-body .field > span.label {
+  width: auto;
+  min-width: 0;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.filter-body .field > span.control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* A value box keeps a readable width and pushes the buttons onto the next line rather than
+   collapsing to a sliver once an operator and a negate button sit beside it. */
+.filter-body .field > .control > input,
+.filter-body .field > .control > select {
+  flex: 1 1 150px;
+  min-width: 150px;
+}
+
+.filter-body .field > .control > .bits { flex: 1 1 160px; min-width: 0; }
+.filter-body .field > .control > .toggle { flex: none; }
+
+/* Extra values for a field stack under the first; the label column stays empty so they read as
+   continuations of the row above rather than as new fields. */
+.condition-row > span.label { color: var(--text-faint); }
+
+.filter-body .segmented.op { flex: none; }
+.filter-body .segmented.op button { height: 22px; padding: 0 7px; font-size: 9.5px; }
+
+.filter-body .field .icon-btn { flex: none; width: 26px; height: 24px; }
+.filter-body .field .icon-btn.not.on { background: var(--danger-tint, var(--accent-tint)); }
+
+.filter-body input.invalid,
+.filter-body select.invalid { border-color: var(--danger, #c1554a); }
+
+/* A card holding a great many fields - a game table's 103 columns - flows them into as many columns
+   as fit, with the label above its control. One field per line was five screens of scrolling, and
+   every long name clipped against the value box. */
+.filter-body .group-card.wide { flex: 1 1 100%; }
+
+.filter-body .group-card.wide > .fields {
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  align-items: start;
+  column-gap: 12px;
+  row-gap: 10px;
+}
+
+.filter-body .group-card.wide .field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 0;
+}
+
+.filter-body .group-card.wide .field > span.label {
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
+/* In a column the value box shares its line with the add button rather than demanding a full line of
+   its own - a hundred fields each two lines tall is the scrolling this layout exists to avoid. */
+.filter-body .group-card.wide .field > .control > input,
+.filter-body .group-card.wide .field > .control > select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* The promoted card. Marked out from the hand-written ones beside it because its fields are the user's
+   own doing and can be given back, which a card that looked identical would not say. */
+.filter-body .group-card.promoted-card { border-color: var(--accent-border); }
+.filter-body .group-card.promoted-card > .group-head { background: var(--accent-tint-2); }
+
+/* A flex card. It draws a row per constraint rather than a row per column, so it opts out of the
+   label/control grid its neighbours use and lays each row out as one line of controls.
+
+   Its floor is one whole constraint wide, well past the 268px a curated card settles for. Beyond that
+   it is left to flow like every other card, which is what keeps the form short: most of these cards are
+   empty most of the time - ten linked rows, one or two of them asked about - and an empty card is one
+   blank picker that has no business owning a line of its own. A card being used states a wider
+   max-content, so it claims the room its constraints need and the empty ones pair up beside each
+   other. */
+.filter-body .group-card.flex-card { min-width: min(100%, 510px); }
+.filter-body .group-card.flex-card.in-use { flex-basis: 100%; }
+
+/* Constraints flow into as many columns as the card is wide enough to hold, and grow downwards from
+   there. One per line wasted most of a wide screen and pushed the rest of the form off the bottom.
+
+   The track floor is the width a whole constraint needs on ONE line - two readable boxes, the operator
+   buttons, and the three that negate, remove and pin it. Packing tighter than that is a false economy:
+   the buttons wrap under the boxes and the row doubles in height, so three columns of two-line rows are
+   taller than three columns of one-line rows and no denser than one column of them. Below the floor a
+   narrow pane gets a single roomy constraint per line instead of a crushed pair. */
+.filter-body .flex-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(486px, 1fr));
+  align-items: start;
+  gap: 8px 14px;
+  padding: 11px 12px 0;
+}
+
+.filter-body .flex-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The column picker is the row's subject and the value box is what is being read back, so those two
+   share the width and the buttons take only what they need. Both keep a floor: past it the buttons
+   wrap under the pair rather than squeezing either into an unreadable sliver. */
+.filter-body .flex-row > select.col {
+  flex: 1 1 148px;
+  min-width: 132px;
+  font-family: var(--font-mono);
+}
+
+.filter-body .flex-row > input {
+  flex: 1 1 136px;
+  min-width: 132px;
+}
+
+/* Tighter than a curated row's: here the operators share their line with two boxes rather than one, and
+   every pixel they give back is a pixel of the floor above - which is what decides how many constraints
+   fit across. */
+.filter-body .flex-row .segmented.op button { padding: 0 4px; }
+.filter-body .flex-row .icon-btn { width: 23px; }
+
+.filter-body .flex-row .icon-btn { flex: none; width: 26px; height: 24px; }
+.filter-body .flex-row .icon-btn.not.on { background: var(--danger-tint, var(--accent-tint)); }
+
+/* An unfinished row - the trailing blank one - is dimmed until it is pointed at a column, so a card
+   reads as its constraints plus an invitation rather than as one more empty control. */
+.filter-body .flex-row > select.col:not(:only-child) { opacity: 1; }
+.filter-body .flex-row > select.col:only-child { opacity: 0.72; }
+
+/* The apply button, kept within reach of a form that is several screens tall. Sticky rather than fixed
+   so it belongs to its pane: the same form is drawn in a split pane and in a pop-out window, and a
+   window-anchored button would sit outside whichever one the user is filtering.
+
+   It is last in the flow and reserves its own strip, so at the end of the scroll it comes to rest below
+   the foot instead of covering the button it stands in for. */
+.filter-float {
+  position: sticky;
+  bottom: 16px;
+  z-index: 6;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+
+  /* The strip is the button plus the sticky offset, with the button sitting at its foot. Sticky holds
+     the strip's bottom edge that offset above the pane, so while the form is scrolled the button rides
+     just above the pane's bottom - and at the end of the scroll, where sticky lifts the strip by the
+     same offset, the button comes to rest exactly at the strip's own top: clear of the foot rather than
+     over the button it stands in for. */
+  height: 46px;
+  align-items: flex-end;
+
+  /* The strip spans the form's width but is empty either side of the button; without this it would
+     swallow clicks meant for the card underneath it. */
+  pointer-events: none;
+}
+
+.filter-float .apply-btn {
+  pointer-events: auto;
+  height: 30px;
+  background: var(--raised);
+  border-color: var(--accent-border);
+  box-shadow: var(--elev);
+}
+
+.filter-float .apply-btn:hover { background: var(--accent-tint); }
+.filter-float .apply-btn:active { background: var(--accent-tint-2); }
+
+/* One OR block. The caption and the rail say which cards are ANDed together, so a block still reads
+   as one unit after its cards have wrapped onto several lines. */
+.filter-block {
+  border-left: 2px solid var(--accent-border);
+  border-radius: 3px;
+  padding-left: 10px;
+}
+
+.block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.block-head .flex { flex: 1; }
+
+.block-index {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  background: var(--accent-tint-2);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-text);
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+.block-title {
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.chips .chip-or,
+.search-terms .chip-or {
+  font-size: 9px;
+  letter-spacing: .12em;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.search-terms { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.search-terms .chip { padding: 2px 7px; font-size: 10px; }
+.search-terms .chip.not { opacity: .75; text-decoration: line-through; }
+
+.chips .shape { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+
+.add-or-block { height: 28px; }
+
+/* A named-bit picker. Sits in place of a mask text box, and stacks rather than overflowing the card. */
+.bits { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+
+.bits .bit {
+  padding: 2px 7px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.bits .bit:hover { border-color: var(--accent-border); color: var(--accent-text); }
+.bits .bit.on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-text); }
+
+/* ---------------------------------------------------------- setup  view */
+
+.setup-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 18px 24px; max-width: 820px; }
+
+.setup-title { font-size: 17px; font-weight: 500; margin-bottom: 3px; }
+.setup-lede { font-size: 11.5px; color: var(--text-dim); margin-bottom: 18px; }
+.setup-lede .mono { color: var(--text-mid); }
+
+.setup-card {
+  background: var(--pane);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 13px 14px 15px;
+  margin-bottom: 12px;
+}
+
+.setup-card .group-head { margin-bottom: 11px; }
+.setup-card .group-head .flex { flex: 1; }
+
+.state-badge {
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 9.5px;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.state-badge.dirty { background: var(--accent-tint); color: var(--accent-text); }
+.state-badge.invalid { border-color: var(--accent-deep); background: var(--accent-tint); color: var(--accent-text); }
+
+.path-row { display: flex; gap: 8px; align-items: center; }
+
+.path-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+}
+
+.path-field.dirty { border-color: var(--accent-border); }
+.path-field i { font-size: 14px; color: var(--accent-deep); }
+
+.path-field input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+}
+
+.browse-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+  height: 30px;
+  padding: 0 12px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent-text);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.browse-btn:hover { background: var(--accent-tint); }
+.browse-btn:active { background: var(--accent-tint-2); }
+.browse-btn i { font-size: 14px; }
+
+.path-hint { font-size: 10.5px; color: var(--text-muted); margin-top: 7px; }
+
+.setup-foot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border);
+}
+
+.setup-foot .note { font-size: 10.5px; color: var(--text-muted); }
+.setup-foot .note .mono { color: var(--text-dim); }
+
+.apply-path-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+  height: 30px;
+  padding: 0 13px;
+  background: transparent;
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+  color: var(--accent-text);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.apply-path-btn.dirty { background: var(--accent-tint); border-color: var(--accent); }
+.apply-path-btn.busy { opacity: .55; cursor: default; }
+.apply-path-btn i { font-size: 14px; }
+
+.revert-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+  height: 30px;
+  padding: 0 12px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.revert-btn:hover { border-color: var(--accent-border); color: var(--accent-text); }
+
+.setup-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.setup-cards .setup-card { margin-bottom: 0; }
+.setup-rows { display: flex; flex-direction: column; gap: 3px; }
+
+/* --------------------------------------------------------------- footer */
+
+.footer {
+  height: var(--h-footer);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px;
+  background: var(--chrome);
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.footer .flex { flex: 1; }
+
+/* ------------------------------------------------------------- palette  */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  background: var(--scrim);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 11vh;
+}
+
+.fade { animation: fade-in 120ms cubic-bezier(.4, 0, .2, 1); }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.palette {
+  width: min(560px, 88vw);
+  background: var(--raised);
+  border: 1px solid var(--border-focus);
+  border-radius: 10px;
+  box-shadow: var(--elev);
+  overflow: hidden;
+}
+
+.palette-input {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  height: 44px;
+  border-bottom: 1px solid var(--border);
+}
+
+.palette-input > i { font-size: 15px; color: var(--accent-icon); }
+
+.palette-input input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.palette-input .kbd { color: var(--text-muted); font-size: 9.5px; padding: 2px 6px; }
+
+.palette-results { max-height: min(52vh, 420px); overflow-y: auto; padding: 5px; }
+
+.palette-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.palette-result:hover, .palette-result.cursor { background: var(--accent-tint); }
+.palette-result i { font-size: 14px; width: 16px; color: var(--accent-icon); }
+.palette-result .label { flex: none; font-size: 12px; color: var(--text); }
+
+.palette-result .sub {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.palette-result .pill {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  font-size: 9px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.palette-none { padding: 24px 0; text-align: center; font-size: 11.5px; color: var(--text-faint); }
+
+.palette-hints {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 13px;
+  background: var(--pane-head);
+  border-top: 1px solid var(--border);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* -------------------------------------------------------- context  menu */
+
+.menu {
+  position: fixed;
+  min-width: 218px;
+  z-index: 9000;
+  background: var(--raised);
+  border: 1px solid var(--border-focus);
+  border-radius: 8px;
+  box-shadow: var(--elev);
+  overflow: hidden;
+}
+
+.menu-head { padding: 6px 11px 7px; border-bottom: 1px solid var(--border); }
+
+.menu-head .title {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 210px;
+}
+
+.menu-head .sub { font-size: 9.5px; color: var(--text-muted); font-family: var(--font-mono); }
+
+.menu-items { display: flex; flex-direction: column; padding: 4px; }
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 9px;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-mid);
+  font-size: 11.5px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menu-item:hover, .menu-item.cursor { background: var(--accent-tint); color: var(--accent-text); }
+.menu-item i { font-size: 13px; width: 15px; color: var(--accent-icon); }
+.menu-item .flex { flex: 1; }
+.menu-item .hint { font-size: 9px; color: var(--text-faint); font-family: var(--font-mono); }
+
+/* ------------------------------------------------------- popout  window */
+
+.popout-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--pane);
+  overflow: hidden;
+}
+
+.popout-title {
+  height: 30px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 6px 0 10px;
+  background: var(--raised-alt);
+  border-bottom: 1px solid var(--border-strong);
+  cursor: grab;
+}
+
+.popout-title > i { flex: none; font-size: 13px; color: var(--accent-icon); }
+.popout-title .label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; }
+
+.popout-title .meta {
+  flex: 0 3 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.title-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.title-btn:hover { background: var(--border-strong); color: var(--text); }
+.title-btn.close:hover { background: var(--accent-border); color: var(--text); }
+
+/* ----------------------------------------------------- window chrome    */
+
+.window-buttons { display: flex; align-items: center; gap: 0; flex: none; margin-left: 4px; }
+
+.window-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.window-btn:hover { background: var(--border-strong); color: var(--text); }
+.window-btn.close:hover { background: var(--accent-border); color: var(--text); }
+
+/* --------------------------------------------------------- boot / error */
+
+.boot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  color: var(--text-dim);
+}
+
+.boot i { font-size: 26px; color: var(--accent); }
+.boot .msg { font-size: 12px; }
+.boot .detail { font-size: 10.5px; color: var(--text-muted); font-family: var(--font-mono); max-width: 70vw; text-align: center; }
+
+.boot-bar { width: min(340px, 60vw); height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.boot-bar .fill { height: 100%; background: var(--accent); }
+
+/* The pop-out title bar is 30px; its Data/Filter control has to fit inside it. */
+.popout-title .segmented { padding: 1px; margin-right: 4px; }
+.popout-title .segmented button { height: 18px; padding: 0 8px; font-size: 10px; }

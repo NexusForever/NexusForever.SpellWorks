@@ -1,0 +1,331 @@
+@using NexusForever.Game.Static.Entity
+@using NexusForever.Game.Static.Spell
+@using NexusForever.GameTable.Model
+@using NexusForever.SpellWorks.Core.Static
+
+<div class="scroll-body">
+    @if (_spell == null)
+    {
+        <div class="empty-state">
+            <i class="ph ph-lightning"></i>
+            <span>No spell selected — pick a row in the Spell4 browser</span>
+        </div>
+    }
+    else
+    {
+        <div class="detail-head">
+            <span class="detail-title">@_spell.Description</span>
+            <span class="detail-sub">@_spell.Id · Tier @_spell.Entry.TierIndex@(Pane.LockedSpellId.HasValue ? " · locked" : "")</span>
+        </div>
+
+        <div class="cards">
+            @foreach (Card card in _cards)
+            {
+                bool collapsed = IsCollapsed(card);
+
+                <div class="card @(collapsed ? "collapsed" : null)">
+                    <button type="button" class="card-head" title="@(collapsed ? "Expand" : "Collapse")"
+                            aria-expanded="@((!collapsed).ToString().ToLowerInvariant())"
+                            @onclick="() => ToggleCard(card)">
+                        <i class="ph @(collapsed ? "ph-caret-right" : "ph-caret-down")"></i>
+                        <span class="title">@card.Title</span>
+                        <div class="pane-flex"></div>
+                        <span class="meta">@card.Meta</span>
+                    </button>
+
+                    @if (!collapsed)
+                    {
+                        <div class="card-body">
+                            @foreach (Row row in card.Rows)
+                            {
+                                <div class="kv">
+                                    <span class="kv-key">@row.Key</span>
+                                    <span class="kv-value" title="@row.Value">@row.Value</span>
+                                    @if (row.Link != null)
+                                    {
+                                        <button type="button" class="link-btn" @onclick="row.Link">@row.LinkLabel</button>
+                                    }
+                                </div>
+                            }
+                        </div>
+
+                        @if (card.Data != null)
+                        {
+                            <div class="data-strip">
+                                <div class="data-strip-label">Data 00 – 09</div>
+                                <div class="data-cells">
+                                    @foreach (DataCell cell in card.Data)
+                                    {
+                                        <div class="data-cell">
+                                            <div class="data-cell-head" title="@cell.Header">@cell.Header</div>
+                                            <div class="data-cell-value">
+                                                <span>@cell.Value</span>
+                                                @if (cell.Link != null)
+                                                {
+                                                    <button type="button" class="link-btn" title="@cell.LinkTitle"
+                                                            @onclick="cell.Link">open</button>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter] public ShellContext Ctx { get; set; }
+
+    [Parameter] public string Scope { get; set; }
+    [Parameter] public PaneState Pane { get; set; }
+    [Parameter] public uint SpellId { get; set; }
+    [Parameter] public int Generation { get; set; }
+
+    private sealed record Row(string Key, string Value, Action Link = null, string LinkLabel = "open");
+    private sealed record DataCell(string Header, string Value, Action Link, string LinkTitle = null);
+    private sealed record Card(string Title, string Meta, List<Row> Rows, List<DataCell> Data = null)
+    {
+        /// <summary>
+        /// What the card is, rather than what it currently says. A fold is remembered against this, so it
+        /// survives moving to another spell - where the title and the meta line both change.
+        /// </summary>
+        public string Key { get; init; } = Title;
+    }
+
+    private ISpellModel _spell;
+    private List<Card> _cards = [];
+    private string _signature;
+
+    /// <summary>
+    /// Which cards the reader has folded away, by the card's own identity rather than its position, so a
+    /// rebuild - a new spell, a new sub-tab - leaves the choice standing.
+    /// </summary>
+    private readonly HashSet<string> _collapsed = [];
+
+    private bool IsCollapsed(Card card) => _collapsed.Contains(card.Key);
+
+    private void ToggleCard(Card card)
+    {
+        if (!_collapsed.Remove(card.Key))
+            _collapsed.Add(card.Key);
+    }
+
+    protected override void OnParametersSet()
+    {
+        string signature = $"{SpellId}|{Pane.SubTab}|{Generation}";
+        if (signature == _signature)
+            return;
+
+        _signature = signature;
+        _spell = Ctx.State.Spell(SpellId);
+        _cards = _spell == null ? [] : Build(_spell);
+    }
+
+    private List<Card> Build(ISpellModel spell)
+    {
+        return Pane.SubTab switch
+        {
+            DetailSubTab.Spell  => SpellCards(spell),
+            DetailSubTab.Procs  => ProcCards(spell),
+            _                   => EffectCards(spell)
+        };
+    }
+
+    // ------------------------------------------------------------------ Spell
+
+    private List<Card> SpellCards(ISpellModel spell)
+    {
+        ISpellBaseModel spellBase = spell.SpellBaseModel;
+        Spell4BaseEntry baseEntry = spellBase.Entry;
+
+        List<Row> baseRows =
+        [
+            new("Name", spellBase.Name),
+            new("Spell Type", spellBase.SpellType?.TypeName ?? "none"),
+            new("Class", EnumText.Name<Class>(baseEntry.ClassIdPlayer)),
+            new("School", EnumText.Name<DamageType>(baseEntry.School)),
+            new("Hit Result", spellBase.HitResult == null ? "none" : $"{spellBase.HitResult.Id} · flags {spellBase.HitResult.Flags}"),
+            new("Target Mechanic", spellBase.TargetMechanics == null
+                ? "none"
+                : $"{EnumText.Name<SpellTargetMechanicType>(spellBase.TargetMechanics.TargetType)} · flags {spellBase.TargetMechanics.Flags}"),
+            new("Target Angle", spellBase.TargetAngle == null ? "none" : $"{spellBase.TargetAngle.TargetAngle:0.##}°"),
+            new("Valid Targets", spellBase.ValidTargets == null ? "none" : $"0x{spellBase.ValidTargets.TargetBitmask:X8}"),
+            new("Prerequisites", spellBase.Prerequisites == null ? "none" : $"{spellBase.Prerequisites.Id} · flags {spellBase.Prerequisites.Flags}"),
+            new("Targeting Flags", $"0x{baseEntry.TargetingFlags:X8}"),
+            new("Weapon Slot", baseEntry.WeaponSlot.ToString()),
+            new("Icon", string.IsNullOrEmpty(baseEntry.Icon) ? "none" : baseEntry.Icon)
+        ];
+
+        if (spellBase.PrerequisiteSpell != null && spellBase.PrerequisiteSpell.Id != 0)
+        {
+            Spell4BaseEntry prerequisite = spellBase.PrerequisiteSpell;
+            baseRows.Add(new Row("Prerequisite Spell", prerequisite.Id.ToString(), () => FollowBaseSpell(prerequisite.Id), "go"));
+        }
+
+        Spell4Entry entry = spell.Entry;
+
+        List<Row> spellRows =
+        [
+            new("Tier", entry.TierIndex.ToString()),
+            new("Cast Method", EnumText.Name<CastMethod>(baseEntry.CastMethod)),
+            new("Cast Time", $"{entry.CastTime} ms"),
+            new("Spell Duration", $"{entry.SpellDuration} ms"),
+            new("Cooldown", $"{entry.SpellCoolDown} ms"),
+            new("Range", $"{entry.TargetMinRange:0.##} – {entry.TargetMaxRange:0.##} m"),
+            new("Vertical Range", $"{entry.TargetVerticalRange:0.##} m"),
+            new("Cost", $"{entry.InnateCost0} / {entry.InnateCost1}"),
+            new("Effects", spell.Effects.Count.ToString()),
+            new("Procs", spell.Procs.Count.ToString()),
+            new("Proc References", spell.ProcReferences.Count.ToString())
+        ];
+
+        // ActionBarTooltip re-parses on every access - read it once, here, and never in a grid.
+        string tooltip = spell.ActionBarTooltip;
+
+        List<Row> tooltipRows =
+        [
+            new("Action bar", string.IsNullOrWhiteSpace(tooltip) ? "none" : tooltip),
+            new("Text Id", entry.LocalizedTextIdActionBarTooltip.ToString())
+        ];
+
+        return
+        [
+            new Card("Base", $"Spell4Base #{baseEntry.Id}", baseRows),
+            new Card("Spell", $"Spell4 #{entry.Id}", spellRows),
+            new Card("Tooltip", "localized text", tooltipRows)
+        ];
+    }
+
+    private void FollowBaseSpell(uint spell4BaseId)
+    {
+        ISpellModel target = Ctx.Models.SpellModels.Values
+            .FirstOrDefault(s => s.Entry.Spell4BaseIdBaseSpell == spell4BaseId);
+
+        if (target != null)
+            Ctx.State.FollowHyperlink(target, Scope);
+    }
+
+    // ------------------------------------------------------------------ Effects
+
+    private List<Card> EffectCards(ISpellModel spell)
+    {
+        List<Card> cards = [];
+
+        for (int i = 0; i < spell.Effects.Count; i++)
+        {
+            ISpellEffectModel effect = spell.Effects[i];
+
+            List<Row> rows =
+            [
+                new("Damage Type", effect.DamageType.ToString()),
+                new("Delay Time", effect.DelayTime.ToString()),
+                new("Tick Time", effect.TickTime.ToString()),
+                new("Duration Time", effect.DurationTime.ToString()),
+                new("Flags", effect.Flags.ToString()),
+                new("Target Flags", $"0x{effect.TargetFlags:X4}")
+            ];
+
+            cards.Add(new Card($"{(uint)effect.Type} — {effect.Type.ToString().ToUpperInvariant()}",
+                $"Spell4Effects idx {i}", rows, DataCells(effect)) { Key = $"effect:{i}" });
+        }
+
+        if (cards.Count == 0)
+            cards.Add(new Card("Effects", "0 rows", [new Row("Effects", "this spell has no effect rows")]));
+
+        return cards;
+    }
+
+    /// <summary>
+    /// Headers are the effect type's real column names; values come from its row data. Where a type has no
+    /// schema class the raw <c>DataBits</c> are rendered rather than throwing.
+    /// </summary>
+    private List<DataCell> DataCells(ISpellEffectModel effect)
+    {
+        ISpellEffectColumnData columns = effect.ColumnData;
+        ISpellEffectRowData data = effect.RowData.FirstOrDefault();
+
+        string[] headers =
+        [
+            columns?.Data00ColumnName, columns?.Data01ColumnName, columns?.Data02ColumnName,
+            columns?.Data03ColumnName, columns?.Data04ColumnName, columns?.Data05ColumnName,
+            columns?.Data06ColumnName, columns?.Data07ColumnName, columns?.Data08ColumnName,
+            columns?.Data09ColumnName
+        ];
+
+        string[] values = data != null
+            ?
+            [
+                data.Data00, data.Data01, data.Data02, data.Data03, data.Data04,
+                data.Data05, data.Data06, data.Data07, data.Data08, data.Data09
+            ]
+            :
+            [
+                effect.Entry.DataBits00.ToString(), effect.Entry.DataBits01.ToString(), effect.Entry.DataBits02.ToString(),
+                effect.Entry.DataBits03.ToString(), effect.Entry.DataBits04.ToString(), effect.Entry.DataBits05.ToString(),
+                effect.Entry.DataBits06.ToString(), effect.Entry.DataBits07.ToString(), effect.Entry.DataBits08.ToString(),
+                effect.Entry.DataBits09.ToString()
+            ];
+
+        List<DataCell> cells = [];
+        for (int i = 0; i < 10; i++)
+        {
+            string header = string.IsNullOrWhiteSpace(headers[i]) ? $"Data{i:00}" : headers[i];
+            cells.Add(Cell(header, values[i] ?? "", data, i));
+        }
+
+        return cells;
+    }
+
+    /// <summary>
+    /// A cell offers its link only when the column cross-references a spell and that spell is
+    /// loaded. A link that leads nowhere is worse than no link: it reads as a broken button.
+    /// </summary>
+    private DataCell Cell(string header, string value, ISpellEffectRowData data, int index)
+    {
+        if (data == null || !data.HyperlinkedDataIndices.Contains(index))
+            return new DataCell(header, value, null);
+
+        if (!Ctx.Models.SpellModels.TryGetValue(data.DataBits(index), out ISpellModel target))
+            return new DataCell(header, value, null);
+
+        return new DataCell(header, value, () => Ctx.State.FollowHyperlink(target, Scope),
+            $"Open {target.Id} — {target.Description}");
+    }
+
+    // ------------------------------------------------------------------ Procs
+
+    private List<Card> ProcCards(ISpellModel spell)
+    {
+        List<Row> casts = spell.Procs
+            .Select(proc => new Row($"Proc {(uint)proc.ProcType}", $"{proc.SpellId}  ·  {Description(proc.SpellId)}",
+                () => Ctx.OpenDetail(proc.SpellId, DetailSubTab.Spell, false), "go"))
+            .ToList();
+
+        if (casts.Count == 0)
+            casts.Add(new Row("Procs", "this spell casts no procs"));
+
+        List<Row> referencedBy = spell.ProcReferences
+            .Select(id => new Row($"Spell {id}", Description(id),
+                () => Ctx.OpenDetail(id, DetailSubTab.Spell, false), "go"))
+            .ToList();
+
+        if (referencedBy.Count == 0)
+            referencedBy.Add(new Row("References", "no spell procs into this one"));
+
+        return
+        [
+            new Card("Procs cast", $"{spell.Procs.Count} rows", casts),
+            new Card("Referenced by", $"{spell.ProcReferences.Count} rows", referencedBy)
+        ];
+    }
+
+    private string Description(uint spellId)
+    {
+        return Ctx.Models.SpellModels.TryGetValue(spellId, out ISpellModel model) ? model.Description : "unknown spell";
+    }
+}

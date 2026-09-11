@@ -1,0 +1,784 @@
+@using NexusForever.Game.Static.Spell
+@using NexusForever.SpellWorks.Services.Filtering
+@using Microsoft.Extensions.Logging
+@implements IDisposable
+@inject ILogger<FilterView> Log
+
+<div class="filter-body">
+    <div class="chips">
+        <span class="chips-label">Active</span>
+
+        @foreach (FilterChip chip in _chips)
+        {
+            if (chip.IsSeparator)
+            {
+                <span class="chip-or">@chip.Label</span>
+            }
+            else
+            {
+                <button type="button" class="chip" @onclick="() => Clear(chip)">@chip.Label<i class="ph ph-x"></i></button>
+            }
+        }
+
+        @if (_chips.Count == 0)
+        {
+            <span class="none">no constraints — all rows returned</span>
+        }
+
+        <div class="flex"></div>
+        <span class="shape">@Shape</span>
+        <button type="button" class="reset-btn" @onclick="ResetAll">Reset all</button>
+    </div>
+
+    @* The common band is only meaningful once there is more than one block to apply across. *@
+    @if (ShowCommon)
+    {
+        <div class="common-band" data-group="common">
+            <div class="group-head">
+                <span class="tick"></span>
+                <span class="group-title">Applies to all blocks</span>
+            </div>
+            <div class="fields">
+                @foreach (FilterCondition condition in Q.Common.Conditions.ToList())
+                {
+                    FilterFieldSchema field = Schema?.Field(condition.Field);
+
+                    @* A pinned flex condition keeps its column picker here, or the band would show a bare
+                       value box and no way to see - let alone change - which column it constrains. A
+                       promoted one does not: its column is fixed everywhere else on the form, and a
+                       picker here would be the one place it could still be changed. *@
+                    if (field is FilterColumnFieldSchema column && !PromotedKeys.Contains(column.Key))
+                    {
+                        @FlexRow(Card(column), condition, Q.Common)
+                    }
+                    else if (field != null)
+                    {
+                        @Row(field, condition, Q.Common, first: true)
+                    }
+                }
+            </div>
+        </div>
+    }
+
+    @for (int index = 0; index < Blocks.Count; index++)
+    {
+        int blockIndex = index;
+        FilterGroup group = Blocks[blockIndex];
+
+        <div class="filter-block">
+            @* Captioned only once there is more than one, so the simple case gains no chrome it does not need. *@
+            @if (Blocks.Count > 1)
+            {
+                <div class="block-head">
+                    <span class="block-index">@(blockIndex + 1)</span>
+                    <span class="block-title">Block @(blockIndex + 1) — all of</span>
+                    <div class="flex"></div>
+                    <button type="button" class="icon-btn remove-block" title="Remove this OR block"
+                            @onclick="() => RemoveBlock(group)"><i class="ph ph-trash"></i></button>
+                </div>
+            }
+
+            <div class="filter-groups" data-group="@blockIndex">
+                @* First, so a column somebody promoted reads as what it now is: a field of this pane,
+                   ahead of the ones that were written out by hand. Drawn in every block, because that is
+                   what being a field means - a promotion is about the pane, not about one block. *@
+                @if (Promoted.Count > 0)
+                {
+                    <div class="group-card promoted-card @(Wide(Promoted.Count) ? "wide" : null)">
+                        <div class="group-head">
+                            <span class="tick"></span>
+                            <span class="group-title">Promoted</span>
+                            <span class="group-count">@Promoted.Count</span>
+                        </div>
+                        <div class="fields">
+                            @CardBody(Promoted, group)
+                        </div>
+                    </div>
+                }
+
+                @foreach (IGrouping<string, FilterFieldSchema> card in Cards)
+                {
+                    <div class="group-card @(Wide(card.Count()) ? "wide" : null)">
+                        <div class="group-head">
+                            <span class="tick"></span>
+                            <span class="group-title">@card.Key</span>
+                            <span class="group-count">@card.Count()</span>
+                        </div>
+                        <div class="fields">
+                            @CardBody(card, group)
+                        </div>
+                    </div>
+                }
+
+                @* One card per linked row. Unlike the cards above it draws a row per constraint rather
+                   than a row per field: its table has a hundred columns, and which of them matters is the
+                   user's to say. *@
+                @foreach (FilterFlexCard card in FlexCards)
+                {
+                    List<FilterCondition> rows = FlexRows(group, card);
+
+                    @* A card being used claims the whole line to fit as many constraints across it as it
+                       can; an empty one is a single picker and pairs up with its neighbours instead. The
+                       grid inside states the same intrinsic width either way - an auto-fill track list
+                       is one track wide however many rows it holds - so this is the flow's to be told. *@
+                    <div class="group-card flex-card @(rows.Count > 0 ? "in-use" : null)" data-flex="@card.Key">
+                        <div class="group-head">
+                            <span class="tick"></span>
+                            <span class="group-title">@card.Title</span>
+                            <span class="group-count">@card.Columns.Count</span>
+                        </div>
+                        <div class="flex-rows">
+                            @foreach (FilterCondition condition in rows)
+                            {
+                                @FlexRow(card, condition, group)
+                            }
+
+                            @* The trailing blank row is how a constraint is started; picking a column on
+                               it is what creates one, so there is always exactly one row to type into. *@
+                            @FlexRow(card, null, group)
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if (blockIndex < Blocks.Count - 1)
+        {
+            <div class="or-divider"><span>OR</span></div>
+        }
+    }
+
+    <div class="filter-foot">
+        <button type="button" class="apply-btn" @onclick="Apply">
+            <i class="ph ph-funnel"></i>@ApplyLabel
+        </button>
+        <button type="button" class="outline-btn add-or-block" @onclick="AddBlock"
+                disabled="@(Blocks.Count >= FilterQuery.MaxGroups)">
+            <i class="ph ph-plus"></i>OR block
+        </button>
+        <span class="hint">Conditions in a block are combined with AND; blocks are combined with OR.</span>
+    </div>
+    
+    <div class="filter-float">
+        <button type="button" class="apply-btn float-apply" @onclick="Apply">
+            <i class="ph ph-funnel"></i>@ApplyLabel
+        </button>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public ShellContext Ctx { get; set; }
+
+    [Parameter] public PaneDescriptor Descriptor { get; set; }
+    [Parameter] public PaneState Pane { get; set; }
+    [Parameter] public uint SpellId { get; set; }
+
+    /// <summary>The effect type an Effect Type spells pane is listing; null for every other kind.</summary>
+    [Parameter] public SpellEffectType? EffectType { get; set; }
+
+    [Parameter] public EventCallback Applied { get; set; }
+
+    /// <summary>Row count the current form would return, previewed on the apply button.</summary>
+    private int? _preview;
+
+    private string ApplyLabel => _preview.HasValue ? $"Apply & show {_preview.Value:n0} rows" : "Apply filter";
+
+    /// <summary>
+    /// What the badge cannot say. Five conditions across two blocks can return more rows than three in one,
+    /// so the header states the shape of the query alongside the count.
+    /// </summary>
+    private string Shape
+    {
+        get
+        {
+            int conditions = FilterChips.ActiveCount(Q, Schema);
+            if (conditions == 0)
+                return "";
+
+            int blocks = Blocks.Count(g => g.Conditions.Any(c => Schema?.Field(c.Field) is { } f && !f.IsBlank(c)));
+            return blocks > 1 ? $"{blocks} blocks · {conditions} conditions" : $"{conditions} conditions";
+        }
+    }
+
+    private FilterQuery Q => Pane.Filters;
+
+    private FilterSchema Schema => Ctx.Schemas?.For(Descriptor);
+
+    private IReadOnlyList<IGrouping<string, FilterFieldSchema>> Cards { get; set; } = [];
+
+    /// <summary>
+    /// The columns this pane has promoted, resolved to their fields and in promotion order.
+    /// </summary>
+    /// <remarks>
+    /// Read live rather than cached: a promotion is made from the context menu, which re-renders the
+    /// shell rather than re-supplying this component's parameters.
+    /// </remarks>
+    private List<FilterFieldSchema> Promoted =>
+        [.. Pane.Promoted.Select(key => Schema?.Field(key)).Where(promoted => promoted != null)];
+
+    /// <summary>The keys of <see cref="Promoted"/>, which the flex cards must not draw a second time.</summary>
+    private HashSet<string> PromotedKeys => [.. Pane.Promoted];
+
+    /// <summary>The blocks to draw. A query with none still shows one, as a single plain form.</summary>
+    private List<FilterGroup> Blocks
+    {
+        get
+        {
+            if (Q.Groups.Count == 0)
+                Q.Groups.Add(new FilterGroup());
+
+            return Q.Groups;
+        }
+    }
+
+    private bool ShowCommon => Q.Common.Conditions.Count > 0 || Q.Groups.Count > 1;
+
+    private List<FilterChip> _chips = [];
+    private readonly Debounce _previewDebounce = new(TimeSpan.FromMilliseconds(150));
+
+    protected override void OnParametersSet()
+    {
+        Cards = Schema?.Cards.ToList() ?? [];
+        _chips = FilterChips.For(Q, Schema);
+    }
+
+    protected override void OnInitialized() => _ = PreviewCount();
+
+    /// <summary>
+    /// Count what the form would return, debounced and off the render thread - the same projection the
+    /// apply itself runs, with the same arguments, so the number on the button is the number you get.
+    /// </summary>
+    private async Task PreviewCount()
+    {
+        try
+        {
+            await Count();
+        }
+        catch (Exception exception)
+        {
+            // The same projection the grid runs, on the same thread pool, so it can fail the same way -
+            // and this one is started fire-and-forget, so a failure has nowhere else to go. The button
+            // drops its promise rather than repeating the count it managed before the form was edited:
+            // a number that is no longer true is worse than no number.
+            Log.LogWarning(exception, "Counting the rows {View} would return failed.", Descriptor.Id);
+
+            _preview = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Count()
+    {
+        await _previewDebounce.Run(
+            token =>
+            {
+                // Read after the pause, so the count answers the form as it now stands.
+                PaneDescriptor descriptor = Descriptor;
+                FilterQuery query = Q.Clone();
+                ISpellModel spell = Ctx.State.Spell(SpellId);
+
+                // The effect type has to travel too: without it the Effect Type spells pane previewed an
+                // empty grid and the button promised a row count the apply would not deliver.
+                SpellEffectType? effectType = EffectType;
+
+                return Task.Run(() => Ctx.Rows.Build(descriptor, query, spell, effectType), token);
+            },
+            data =>
+            {
+                _preview = data.Rows.Length;
+                StateHasChanged();
+            });
+    }
+
+    // ------------------------------------------------------------------ one condition row
+
+    /// <summary>
+    /// Above this many fields a card lays its fields out in columns rather than one per line.
+    /// </summary>
+    /// <remarks>
+    /// A generic game table contributes one field per column - Spell4 has over a hundred - and a single vertical list
+    /// of those is way too long.
+    /// </remarks>
+    private const int WideCardFields = 8;
+
+    private static bool Wide(int fields) => fields > WideCardFields;
+
+    /// <summary>
+    /// The fields of one card: every condition this block places on each, and a blank row for the ones
+    /// it does not constrain yet.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the hand-written cards and the promoted one, because a promoted column <em>is</em> one
+    /// of these fields - <see cref="FilterColumnFieldSchema"/> carries a control, a placeholder and a set
+    /// of operators like any other, so <see cref="Row"/> draws it with no special case at all.
+    /// </remarks>
+    private RenderFragment CardBody(IEnumerable<FilterFieldSchema> fields, FilterGroup group) =>
+        @<text>
+            @foreach (FilterFieldSchema field in fields)
+            {
+                List<FilterCondition> rows = Rows(group, field);
+
+                @for (int r = 0; r < rows.Count; r++)
+                {
+                    @Row(field, rows[r], group, first: r == 0)
+                }
+
+                @if (rows.Count == 0)
+                {
+                    @Row(field, null, group, first: true)
+                }
+            }
+        </text>;
+
+    private List<FilterCondition> Rows(FilterGroup group, FilterFieldSchema field) =>
+        group.Conditions.Where(c => c.Field == field.Key).ToList();
+
+    /// <summary>
+    /// One control. <paramref name="condition"/> is null for a field the block does not constrain yet - the
+    /// row still renders, and typing into it is what creates the condition. Nothing empty is ever stored.
+    /// </summary>
+    private RenderFragment Row(FilterFieldSchema field, FilterCondition condition, FilterGroup group, bool first) =>
+        @* Keyed on the condition it edits. Without a key the diff matches these rows by position within a
+           compiler-assigned sequence, and rows built by one method share that sequence - so a row that
+           grows an operator control gets confused with the next field's row and writes a value into it. *@
+        @<label class="field @(first ? null : "condition-row")" data-field="@field.Key"
+                title="@field.QualifiedLabel"
+                @oncontextmenu:preventDefault="true"
+                @oncontextmenu:stopPropagation="true"
+                @oncontextmenu="e => ColumnMenu(e, field)"
+                @key="(field.Key, condition)">
+            <span class="label">@(first ? field.QualifiedLabel : "")</span>
+
+            @* The control and its buttons share one wrapper so they wrap together onto a second line when
+               the card is narrow, rather than the buttons squeezing the value box down to nothing. *@
+            <span class="control">
+                @switch (field.Control)
+                {
+                    case FilterControlKind.Choice:
+                        <select value="@Value(condition)" data-field="@field.Key"
+                                @onchange="e => Set(field, condition, group, e.Value?.ToString())">
+                            @foreach (string option in field.Options)
+                            {
+                                <option value="@option">@option</option>
+                            }
+                        </select>
+                        break;
+
+                    case FilterControlKind.Flags:
+                        <div class="bits">
+                            @foreach ((string name, uint bit) in field.Bits)
+                            {
+                                <button type="button" class="bit @(HasBit(condition, bit) ? "on" : null)"
+                                        title="@name" @onclick="() => ToggleBit(field, condition, group, bit)">@name</button>
+                            }
+                        </div>
+                        break;
+
+                    case FilterControlKind.Toggle:
+                        <button type="button" class="toggle @(condition != null ? "on" : null)"
+                                @onclick="() => ToggleFlag(field, condition, group)">@(condition != null ? "on" : "off")</button>
+                        break;
+
+                    default:
+                        <input value="@Value(condition)" placeholder="@field.Placeholder"
+                               class="@(Invalid(field, condition) ? "invalid" : null)"
+                               @onchange="e => Set(field, condition, group, e.Value?.ToString())" />
+                        break;
+                }
+
+                @if (condition != null && field.AllowedOperators.Count > 1)
+                {
+                    <div class="segmented op">
+                        @foreach (FilterOperator op in field.AllowedOperators)
+                        {
+                            <button type="button" class="@(condition.Operator == op ? "on" : null)"
+                                    title="@op" @onclick="() => SetOperator(condition, op)">@OperatorLabel(op)</button>
+                        }
+                    </div>
+                }
+
+                @if (condition != null)
+                {
+                    <button type="button" class="icon-btn not @(condition.Negate ? "on" : null)"
+                            title="Negate this condition" @onclick="() => ToggleNegate(condition)">
+                        <i class="ph ph-exclamation-mark"></i>
+                    </button>
+                }
+
+                @if (first)
+                {
+                    <button type="button" class="icon-btn add-condition" title="Add another value for this field"
+                            @onclick="() => AddCondition(field, group)"><i class="ph ph-plus"></i></button>
+                }
+                else
+                {
+                    <button type="button" class="icon-btn remove-condition" title="Remove this condition"
+                            @onclick="() => RemoveCondition(condition)"><i class="ph ph-x"></i></button>
+                }
+
+                @if (condition != null && ShowCommon)
+                {
+                    bool common = Q.Common.Conditions.Contains(condition);
+
+                    <button type="button" class="icon-btn pin-common @(common ? "on" : null)"
+                            title="Apply this condition to every block"
+                            @onclick="() => TogglePin(condition, common)"><i class="ph ph-push-pin"></i></button>
+                }
+            </span>
+        </label>;
+
+    private static string Value(FilterCondition condition) => condition?.Value ?? "";
+
+    // ------------------------------------------------------------------ one flex row
+
+    /// <summary>The sentinel the column picker shows for a row that has not chosen one yet.</summary>
+    private const string NoColumn = "";
+
+    private IReadOnlyList<FilterFlexCard> FlexCards => Schema?.FlexCards ?? [];
+
+    /// <summary>The card a flex column belongs to, or null if the schema no longer offers that source.</summary>
+    private FilterFlexCard Card(FilterColumnFieldSchema column) =>
+        FlexCards.FirstOrDefault(c => c.Key == column.Source);
+
+    /// <summary>The conditions this block already places on one linked row, in the order they were added.</summary>
+    /// <summary>
+    /// The constraints this block places on one linked row, minus the ones whose column has been
+    /// promoted - those are drawn as fields of their own, and drawing them twice would be two controls
+    /// editing one condition.
+    /// </summary>
+    private List<FilterCondition> FlexRows(FilterGroup group, FilterFlexCard card)
+    {
+        HashSet<string> promoted = PromotedKeys;
+
+        return group.Conditions
+            .Where(c => Schema?.Field(c.Field) is FilterColumnFieldSchema column
+                && column.Source == card.Key
+                && !promoted.Contains(column.Key))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The columns a card still offers. A promoted one is left out: it is reachable as a field now, and
+    /// picking it here would create a condition that renders somewhere else on the form.
+    /// </summary>
+    private IEnumerable<FilterColumnFieldSchema> Columns(FilterFlexCard card)
+    {
+        HashSet<string> promoted = PromotedKeys;
+
+        return (card?.Columns ?? []).Where(column => !promoted.Contains(column.Key));
+    }
+
+    private FilterColumnFieldSchema Column(FilterCondition condition) =>
+        condition == null ? null : Schema?.Field(condition.Field) as FilterColumnFieldSchema;
+
+    /// <summary>
+    /// One flex constraint: the column it asks about, and then the same value box, operator control and
+    /// buttons every other row of the form uses.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on the condition alone, unlike <see cref="Row"/>. The field key changes underneath this row
+    /// whenever the column picker is used, so keying on it as well would tell the diff that a row was
+    /// replaced every time it was edited - and the row it then matched against would be its neighbour.
+    /// </remarks>
+    private RenderFragment FlexRow(FilterFlexCard card, FilterCondition condition, FilterGroup group) =>
+        @<div class="flex-row" data-flex="@card?.Key"
+              @oncontextmenu:preventDefault="true"
+              @oncontextmenu:stopPropagation="true"
+              @oncontextmenu="e => ColumnMenu(e, Column(condition))"
+              @key="(object)condition ?? card">
+            <select class="col" value="@(condition?.Field ?? NoColumn)" data-flex-column="@card?.Key"
+                    @onchange="e => SetColumn(condition, group, e.Value?.ToString())">
+                <option value="@NoColumn">Column…</option>
+                @foreach (FilterColumnFieldSchema column in Columns(card))
+                {
+                    <option value="@column.Key">@column.Label</option>
+                }
+            </select>
+
+            @if (Column(condition) is { } field)
+            {
+                <input value="@Value(condition)" placeholder="@field.Placeholder"
+                       class="@(Invalid(field, condition) ? "invalid" : null)"
+                       @onchange="e => SetFlexValue(condition, e.Value?.ToString())" />
+
+                <div class="segmented op">
+                    @foreach (FilterOperator op in field.AllowedOperators)
+                    {
+                        <button type="button" class="@(condition.Operator == op ? "on" : null)"
+                                title="@op" @onclick="() => SetOperator(condition, op)">@OperatorLabel(op)</button>
+                    }
+                </div>
+
+                <button type="button" class="icon-btn not @(condition.Negate ? "on" : null)"
+                        title="Negate this condition" @onclick="() => ToggleNegate(condition)">
+                    <i class="ph ph-exclamation-mark"></i>
+                </button>
+
+                <button type="button" class="icon-btn remove-condition" title="Remove this condition"
+                        @onclick="() => RemoveCondition(condition)"><i class="ph ph-x"></i></button>
+
+                @if (ShowCommon)
+                {
+                    bool common = Q.Common.Conditions.Contains(condition);
+
+                    <button type="button" class="icon-btn pin-common @(common ? "on" : null)"
+                            title="Apply this condition to every block"
+                            @onclick="() => TogglePin(condition, common)"><i class="ph ph-push-pin"></i></button>
+                }
+            }
+        </div>;
+
+    private static bool HasBit(FilterCondition condition, uint bit)
+    {
+        return condition != null && FilterValue.TryUInt(condition.Value, out uint value) && (value & bit) == bit;
+    }
+
+    /// <summary>
+    /// Flip one named bit of a mask. The condition still stores the assembled number, so a picked mask and a
+    /// typed one persist and compile identically.
+    /// </summary>
+    private void ToggleBit(FilterFieldSchema field, FilterCondition condition, FilterGroup group, uint bit)
+    {
+        uint value = condition != null && FilterValue.TryUInt(condition.Value, out uint current) ? current : 0;
+        value = (value & bit) == bit ? value & ~bit : value | bit;
+
+        // Clearing the last bit clears the constraint, as clearing any other control does.
+        Set(field, condition, group, value == 0 ? "" : $"0x{value:X}");
+    }
+
+    private bool Invalid(FilterFieldSchema field, FilterCondition condition) =>
+        condition != null && !field.IsValid(condition);
+
+    /// <summary>
+    /// The sign a segmented operator button carries.
+    /// </summary>
+    /// <remarks>
+    /// Signs rather than names throughout: the control sits beside the value box and a written-out
+    /// "Contains" is wider than the box itself. They are the same signs the chips row reads back with, so
+    /// the button and the chip say the same thing.
+    ///
+    /// Equals falls to the default arm along with the two operators that never draw this control at all -
+    /// StartsWith and IsSet belong to single-operator fields, and "=" is what the chips row calls the
+    /// first of those anyway.
+    /// </remarks>
+    private static string OperatorLabel(FilterOperator op) => op switch
+    {
+        FilterOperator.AtLeast  => "≥",
+        FilterOperator.AtMost   => "≤",
+        FilterOperator.MaskAll  => "ALL",
+        FilterOperator.MaskAny  => "ANY",
+        FilterOperator.Contains => "HAS",
+        _                       => "="
+    };
+
+    // ------------------------------------------------------------------ edits
+
+    private void Set(FilterFieldSchema field, FilterCondition condition, FilterGroup group, string value)
+    {
+        value ??= "";
+
+        if (condition == null)
+        {
+            // Nothing typed into an empty control is still nothing - do not store a blank condition.
+            if (string.IsNullOrWhiteSpace(value) || value == FilterFieldSchema.Any)
+                return;
+
+            group.Conditions.Add(new FilterCondition
+            {
+                Field    = field.Key,
+                Operator = field.DefaultOperator,
+                Value    = value
+            });
+        }
+        else if (string.IsNullOrWhiteSpace(value) || value == FilterFieldSchema.Any)
+        {
+            // Clearing a control clears the constraint, which is what the chips row then stops showing.
+            Q.RemoveCondition(condition);
+        }
+        else
+        {
+            condition.Value = value;
+        }
+
+        Refresh();
+    }
+
+    private void ToggleFlag(FilterFieldSchema field, FilterCondition condition, FilterGroup group)
+    {
+        if (condition != null)
+        {
+            Q.RemoveCondition(condition);
+        }
+        else
+        {
+            group.Conditions.Add(new FilterCondition
+            {
+                Field    = field.Key,
+                Operator = FilterOperator.IsSet,
+
+                // Every toggle is phrased positively - Deprecated selects deprecated spells - but for the
+                // housekeeping ones the useful reading is the negative, so those start negated and switching
+                // one on means "hide these". Which they are is the schema's to say, so a new one needs no
+                // change here.
+                Negate   = field.SeedNegated
+            });
+        }
+
+        Refresh();
+    }
+
+    /// <summary>
+    /// The promote/demote menu for a flex column.
+    /// </summary>
+    /// <remarks>
+    /// Guarded rather than wired selectively: <see cref="Row"/> draws the hand-written fields too, and a
+    /// curated field has no column to promote - it is already one. Right-clicking those does nothing.
+    /// </remarks>
+    private void ColumnMenu(MouseEventArgs e, FilterFieldSchema field)
+    {
+        if (field is not FilterColumnFieldSchema column)
+            return;
+
+        Ctx.ShowMenu(e.ClientX, e.ClientY, column.QualifiedLabel,
+            Pane.Promoted.Contains(column.Key) ? "Promoted field" : column.GroupTitle,
+            Ctx.PromoteMenu(Pane, column));
+    }
+
+    private void ToggleNegate(FilterCondition condition)
+    {
+        condition.Negate = !condition.Negate;
+        Refresh();
+    }
+
+    private void SetOperator(FilterCondition condition, FilterOperator op)
+    {
+        condition.Operator = op;
+        Refresh();
+    }
+
+    /// <summary>
+    /// Point a flex row at a column. On the blank row that creates the constraint; on an existing row it
+    /// repoints it, and clearing the picker drops it.
+    /// </summary>
+    /// <remarks>
+    /// A repointed row keeps its value and its polarity, so correcting a mistyped column does not make the
+    /// user type the value again. The operator is coerced to the new column's default when the old one is
+    /// not among what it offers - a threshold carried onto a text column would otherwise persist as an
+    /// operator that column cannot answer. That is the same rule the persistence mapper applies to a saved
+    /// operator a field no longer has.
+    /// </remarks>
+    private void SetColumn(FilterCondition condition, FilterGroup group, string key)
+    {
+        if (Schema?.Field(key) is not FilterColumnFieldSchema field)
+        {
+            // The picker went back to "Column…". An unnamed constraint asks nothing, so it stops existing.
+            if (condition != null)
+                Q.RemoveCondition(condition);
+
+            Refresh();
+            return;
+        }
+
+        if (condition == null)
+        {
+            group.Conditions.Add(new FilterCondition { Field = field.Key, Operator = field.DefaultOperator });
+        }
+        else
+        {
+            condition.Field = field.Key;
+
+            if (!field.AllowedOperators.Contains(condition.Operator))
+                condition.Operator = field.DefaultOperator;
+        }
+
+        Refresh();
+    }
+
+    /// <summary>
+    /// Type into a flex row.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="Set"/>, emptying the box does not drop the condition: the row was brought into
+    /// being by picking a column, and clearing a value the user is about to retype should not take the
+    /// column with it. A blank flex condition constrains nothing, compiles away, and is pruned on apply -
+    /// so nothing empty is persisted either way. The row's own × is how it is removed.
+    /// </remarks>
+    private void SetFlexValue(FilterCondition condition, string value)
+    {
+        condition.Value = value ?? "";
+        Refresh();
+    }
+
+    private void AddCondition(FilterFieldSchema field, FilterGroup group)
+    {
+        group.Conditions.Add(new FilterCondition { Field = field.Key, Operator = field.DefaultOperator });
+        Refresh();
+    }
+
+    private void RemoveCondition(FilterCondition condition)
+    {
+        Q.RemoveCondition(condition);
+        Refresh();
+    }
+
+    private void TogglePin(FilterCondition condition, bool common)
+    {
+        if (common)
+            Q.MakeLocal(condition);
+        else
+            Q.MakeCommon(condition);
+
+        Refresh();
+    }
+
+    private void AddBlock()
+    {
+        Q.AddGroup();
+        Refresh();
+    }
+
+    private void RemoveBlock(FilterGroup group)
+    {
+        Q.Groups.Remove(group);
+        Refresh();
+    }
+
+    private void Clear(FilterChip chip)
+    {
+        chip.Clear?.Invoke();
+        Refresh();
+        Save();
+    }
+
+    private void ResetAll()
+    {
+        Q.Reset();
+        Refresh();
+    }
+
+    private void Refresh()
+    {
+        _chips = FilterChips.For(Q, Schema);
+        _ = PreviewCount();
+        Ctx.State.Notify();
+    }
+
+    /// <summary>
+    /// Persist the workspace. Called on apply and on a chip clear - the two points where the user has said
+    /// what they meant, rather than on every keystroke.
+    /// </summary>
+    private void Save() => Ctx.Store.Save();
+
+    private async Task Apply()
+    {
+        Q.Prune(Schema);
+
+        Pane.Mode = PaneMode.Rows;
+        await Applied.InvokeAsync();
+
+        Ctx.State.Notify();
+        Save();
+    }
+
+    public void Dispose() => _previewDebounce.Dispose();
+}

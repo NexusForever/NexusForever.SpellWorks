@@ -1,0 +1,627 @@
+@using CommunityToolkit.Mvvm.Messaging
+@using NexusForever.SpellWorks.Core.Messages
+@implements IDisposable
+@inject WorkspaceState State
+@inject RowSource Rows
+@inject FilterSchemaRegistry Schemas
+@inject ITableCatalog Catalog
+@inject IEngineHost Engine
+@inject ISpellModelService Models
+@inject ITextTableService Text
+@inject IPopoutHost Popouts
+@inject IInstallationProbe Probe
+@inject IFolderPicker FolderPicker
+@inject WorkspaceStore Store
+@inject PaletteIndex Palette
+@inject IMessenger Messenger
+@inject IJSRuntime Js
+
+<CascadingValue Value="_ctx" IsFixed="false">
+<div class="app" @onmousedown="DismissMenu">
+
+    <nav class="rail @(State.Preferences.RailLabels ? null : "compact")">
+        <div class="rail-brand"><i class="ph ph-sparkle"></i></div>
+
+        @foreach (PaneDescriptor view in PaneDescriptor.RailViews)
+        {
+            @RailItem(view, false)
+        }
+
+        @if (State.Pinned.Count > 0)
+        {
+            <div class="rail-divider">
+                <span></span><span class="label">PINNED</span><span></span>
+            </div>
+            <div class="rail-pinned">
+                @foreach (string id in State.Pinned)
+                {
+                    @RailItem(State.Describe(id), true)
+                }
+            </div>
+        }
+        else
+        {
+            <div class="rail-spacer"></div>
+        }
+
+        <div class="rail-gap"></div>
+        @RailItem(PaneDescriptor.Setup, false)
+    </nav>
+
+    <div class="main">
+
+        <header class="header" @onmousedown="BeginWindowDrag">
+            <span class="brand">SPELLWORKS</span>
+            <span class="header-divider"></span>
+
+            <span class="archive-path" title="@ArchiveLabel">
+                <i class="ph ph-archive"></i>
+                <span class="path">@ArchiveLabel</span>
+            </span>
+
+            <span class="table-count">
+                <span class="dot"></span>
+                <span>@Catalog.Tables.Count tables</span>
+            </span>
+
+            <div class="header-flex"></div>
+
+            <button type="button" class="jump-btn" title="Command palette"
+                    @onclick="OpenPalette" @onmousedown:stopPropagation="true">
+                <i class="ph ph-magnifying-glass"></i>Jump to…
+                <span class="kbd">⌘K</span>
+            </button>
+
+            <div class="segmented" @onmousedown:stopPropagation="true">
+                <button type="button" class="@(State.Layout == LayoutMode.Tabbed ? "on" : null)"
+                        @onclick="() => State.SetLayout(LayoutMode.Tabbed)">
+                    <i class="ph ph-square-split-vertical"></i>Tabbed
+                </button>
+                <button type="button" class="@(State.Layout == LayoutMode.SplitPanes ? "on" : null)"
+                        @onclick="() => State.SetLayout(LayoutMode.SplitPanes)">
+                    <i class="ph ph-columns"></i>Split panes
+                </button>
+            </div>
+
+            <button type="button" class="accent-btn" title="Pop out current view"
+                    @onclick="PopOutActive" @onmousedown:stopPropagation="true">
+                <i class="ph ph-arrow-square-out"></i>Pop out
+            </button>
+
+            <div class="window-buttons" @onmousedown:stopPropagation="true">
+                <button type="button" class="window-btn" title="Minimize" @onclick="() => Bridge.Minimize()"><i class="ph ph-minus"></i></button>
+                <button type="button" class="window-btn" title="Maximize" @onclick="() => Bridge.ToggleMaximize()"><i class="ph ph-square"></i></button>
+                <button type="button" class="window-btn close" title="Close" @onclick="() => Bridge.Close()"><i class="ph ph-x"></i></button>
+            </div>
+        </header>
+
+        @if (State.Layout == LayoutMode.Tabbed)
+        {
+            <div class="tabstrip" @ref="_tabstripElement">
+                @foreach (string id in State.Open)
+                {
+                    PaneDescriptor tab = State.Describe(id);
+                    string tabId = id;
+                    int count = _ctx.FilterCount(tabId, tab);
+
+                    <div class="tab @(State.Active == tabId ? "active" : null)"
+                         data-view-id="@tabId"
+                         @key="tabId"
+                         @oncontextmenu:preventDefault="true"
+                         @oncontextmenu="e => ShowViewMenu(e, tabId, false)"
+                         @onmouseup="e => MiddleClose(e, tabId)"
+                         @onpointerdown="e => BeginTabDrag(e, tabId)">
+                        <button type="button" class="tab-select" @onclick="() => State.ActivateOnly(tabId)">
+                            <i class="@tab.Icon"></i>@tab.Title
+                            @if (count > 0)
+                            {
+                                <span class="badge">@count</span>
+                            }
+                        </button>
+                        <button type="button" class="tab-close" title="Close view" @onclick="() => State.CloseView(tabId)">
+                            <i class="ph ph-x"></i>
+                        </button>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="panes" @ref="_panesElement">
+            @{
+                List<string> paneIds = PaneIds();
+            }
+
+            @for (int i = 0; i < paneIds.Count; i++)
+            {
+                string id = paneIds[i];
+                int index = i;
+
+                @if (State.Layout == LayoutMode.SplitPanes && index > 0)
+                {
+                    <div class="pane-splitter" title="Drag to resize panes"
+                         @key="@("seam:" + id)"
+                         @onpointerdown="e => BeginSplitDrag(e, index - 1)"></div>
+                }
+
+                <section class="pane" style="flex:@FlexStyle(id) 1 0;min-width:0" @key="id">
+                    <Pane Descriptor="State.Describe(id)" Scope="@id" Generation="_generation" ReloadRequested="Reload" />
+                </section>
+            }
+
+            @if (paneIds.Count == 0)
+            {
+                <div class="pane" style="flex:1">
+                    <div class="empty-state" style="margin:auto">
+                        <i class="ph ph-funnel-x"></i>
+                        <span>No view open — pick one from the rail</span>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <footer class="footer">
+            <span>@StatusLeft</span>
+            <div class="flex"></div>
+            <span>@Popouts.OpenCount popped-out window(s)</span>
+            <span>@Spell4Status</span>
+        </footer>
+    </div>
+</div>
+
+@if (_paletteOpen)
+{
+    <Palette @ref="_palette" Index="Palette" Cursor="_paletteCursor"
+             CursorChanged="c => _paletteCursor = c" Closed="ClosePalette" />
+}
+
+<ContextMenu Model="_ctx.Menu" Closed="() => StateHasChanged()" />
+
+@if (_booting)
+{
+    <div class="scrim" style="align-items:center">
+        <div class="boot">
+            <i class="ph ph-sparkle"></i>
+            <div class="msg">@(_progress?.Message ?? "Reading client archive…")</div>
+            <div class="boot-bar"><div class="fill" style="width:@BootPercent%"></div></div>
+            <div class="detail">@Engine.PatchPath</div>
+        </div>
+    </div>
+}
+</CascadingValue>
+
+@code {
+    [Parameter] public IWindowBridge Bridge { get; set; }
+
+    private ShellContext _ctx;
+    private DotNetObjectReference<Shell> _self;
+    private IJSObjectReference _module;
+    private ElementReference _panesElement;
+    private ElementReference _tabstripElement;
+
+    private Palette _palette;
+    private bool _paletteOpen;
+    private int _paletteCursor;
+
+    private bool _booting;
+    private EngineProgress _progress;
+    private int _generation;
+
+    private string ArchiveLabel => Engine.Info != null
+        ? System.IO.Path.Combine(Engine.PatchPath ?? "", Engine.Info.ArchiveName ?? "")
+        : Engine.PatchPath ?? "no patch path configured";
+
+    private double BootPercent
+    {
+        get
+        {
+            if (_progress?.Value is not double value)
+                return 0;
+
+            double span = _progress.Maximum - _progress.Minimum;
+            return span <= 0 ? 0 : Math.Clamp((value - _progress.Minimum) / span * 100d, 0, 100);
+        }
+    }
+
+    private string StatusLeft
+    {
+        get
+        {
+            if (State.Active == null)
+                return "No view open — pick one from the rail";
+
+            PaneDescriptor active = State.Describe(State.Active);
+            int count = _ctx.FilterCount(State.Active, active);
+            return $"{active.Title} · {count} filter(s) active";
+        }
+    }
+
+    private string Spell4Status
+    {
+        get
+        {
+            TableDescriptor spell4 = Catalog.Get("Spell4");
+            return spell4 == null ? "Spell4.tbl · not loaded" : $"Spell4.tbl · {spell4.RowCount:n0} rows";
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        _ctx = new ShellContext
+        {
+            State    = State,
+            Rows     = Rows,
+            Schemas  = Schemas,
+            Catalog  = Catalog,
+            Engine   = Engine,
+            Models   = Models,
+            Text     = Text,
+            Popouts  = Popouts,
+            Store    = Store,
+            Bridge   = Bridge,
+            Probe    = Probe,
+            FolderPicker = FolderPicker,
+            Refresh  = () => InvokeAsync(StateHasChanged),
+            IsPopout = false
+        };
+
+        State.PathDraft ??= Engine.PatchPath;
+        State.Changed += OnStateChanged;
+
+        // Cross-window notification. The handler can fire on another window's thread, so it must marshal.
+        Messenger.Register<SpellResourcesLoaded>(this, (_, _) => _ = InvokeAsync(StateHasChanged));
+        Messenger.Register<SpellSelectedMessage>(this, (_, _) => _ = InvokeAsync(StateHasChanged));
+        Messenger.Register<SpellHyperlinkClicked>(this, (_, _) => _ = InvokeAsync(StateHasChanged));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        _module = await Js.InvokeAsync<IJSObjectReference>("import", "./js/shell.js");
+        _ctx.Js = _module;
+
+        _self = DotNetObjectReference.Create(this);
+        await _module.InvokeVoidAsync("registerHotkeys", _self);
+
+        StateHasChanged();
+
+        if (Engine.State == EngineState.Idle && State.Preferences.LoadOnStart)
+            await Boot();
+    }
+
+    private void OnStateChanged() => _ = InvokeAsync(StateHasChanged);
+
+    // ------------------------------------------------------------------ engine
+
+    /// <summary>
+    /// The start-up load, and what happens once it lands.
+    /// </summary>
+    /// <remarks>
+    /// Reading the archive takes seconds and the window can be closed while the scrim is up, so what
+    /// follows the await has to ask whether there is still a shell to follow it for. Restoring the
+    /// pop-outs is the sharp one: it builds WPF windows, and building a window after the last one closed
+    /// is building it during shutdown.
+    /// </remarks>
+    private async Task Boot()
+    {
+        _booting = true;
+        await LoadEngine(Engine.PatchPath);
+        _booting = false;
+
+        if (_disposed)
+            return;
+
+        RestorePopouts();
+        StateHasChanged();
+    }
+
+    /// <summary>Re-run the engine against <paramref name="patchPath"/> and reproject every open grid.</summary>
+    private async Task Reload()
+    {
+        await LoadEngine(State.PathDraft ?? Engine.PatchPath);
+        StateHasChanged();
+    }
+
+    private async Task LoadEngine(string patchPath)
+    {
+        DateTime last = DateTime.MinValue;
+
+        var progress = new Progress<EngineProgress>(report =>
+        {
+            _progress = report;
+
+            if (DateTime.UtcNow - last < TimeSpan.FromMilliseconds(80))
+                return;
+
+            last = DateTime.UtcNow;
+            _ = InvokeAsync(StateHasChanged);
+        });
+
+        // Before the load, not after it: the engine stamps the text table's name and string count into
+        // Info as it finishes, reading them from whichever locale the text service is pointing at. Setting
+        // the preference afterwards would have Setup describe the locale that was current before this load.
+        Text.Locale = State.Preferences.Locale;
+
+        await Engine.ReloadAsync(patchPath, progress);
+
+        // Again, now that the tables behind it exist: the setter resolves against what is loaded, and
+        // before the load there was nothing to resolve against.
+        Text.Locale = State.Preferences.Locale;
+
+        Palette.Rebuild();
+        State.InvalidateDescriptors();
+
+        // A reload can change which tables exist and what columns they carry, which is what the per-column
+        // filter fields are built from.
+        Schemas.Invalidate();
+
+        // And so the saved filters get their second chance: the workspace is read in App.OnStartup, before
+        // this has ever run, so a condition on one of those columns has no field to resolve against. Panes
+        // the user has since touched are left alone.
+        Store.ReapplyFilters();
+        State.PathDraft = Engine.PatchPath;
+        _generation++;
+
+        if (Engine.State == EngineState.Failed)
+        {
+            State.IsBrowsing = true;
+            State.SelectView(PaneDescriptor.Setup.Id);
+        }
+    }
+
+    private void RestorePopouts()
+    {
+        if (!State.Preferences.RestoreWindows)
+            return;
+
+        foreach (string viewId in Store.RestorablePopouts)
+            Popouts.Popout(viewId);
+    }
+
+    // ------------------------------------------------------------------ layout
+
+    private List<string> PaneIds()
+    {
+        if (State.Layout == LayoutMode.SplitPanes)
+            return [.. State.Open];
+
+        return State.Active == null ? [] : [State.Active];
+    }
+
+    private string FlexStyle(string id)
+    {
+        double flex = State.Layout == LayoutMode.SplitPanes ? State.FlexOf(id) : 1d;
+        return flex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private async Task BeginSplitDrag(PointerEventArgs e, int index)
+    {
+        if (_module != null)
+            await _module.InvokeVoidAsync("beginSplitDrag", _panesElement, index, e, _self);
+    }
+
+    [JSInvokable]
+    public void OnSplitDragged(double[] flexes)
+    {
+        State.SetFlexes(PaneIds(), flexes);
+    }
+
+    /// <summary>
+    /// Tab gesture: drag sideways to reorder the strip, or drop on the rail to pin. Both outcomes are
+    /// decided in JS and reported back exactly once, on release.
+    /// </summary>
+    private async Task BeginTabDrag(PointerEventArgs e, string viewId)
+    {
+        if (e.Button != 0 || _module == null)
+            return;
+
+        PaneDescriptor descriptor = State.Describe(viewId);
+        await _module.InvokeVoidAsync("beginTabDrag", _tabstripElement, viewId, descriptor.CanPin, e, _self);
+    }
+
+    [JSInvokable]
+    public void OnTabReordered(string viewId, int toIndex)
+    {
+        State.MoveView(viewId, toIndex);
+        Store.Save();
+    }
+
+    private async Task BeginPinDrag(PointerEventArgs e, string viewId)
+    {
+        PaneDescriptor descriptor = State.Describe(viewId);
+        if (e.Button != 0 || !descriptor.CanPin || _module == null)
+            return;
+
+        await _module.InvokeVoidAsync("beginPinDrag", viewId, State.Pinned.Contains(viewId) ? "unpin" : "pin", e, _self);
+    }
+
+    [JSInvokable]
+    public void OnPinDropped(string viewId, string mode)
+    {
+        if (mode == "pin")
+            State.Pin(viewId);
+        else
+            State.Unpin(viewId);
+
+        Store.Save();
+    }
+
+    // ------------------------------------------------------------------ chrome
+
+    private void BeginWindowDrag(MouseEventArgs e)
+    {
+        DismissMenu();
+
+        // DragMove runs a nested WPF message loop that swallows the following click, so the second press
+        // has to be recognised here rather than through a dblclick event that never arrives.
+        if (e.Detail >= 2)
+            Bridge.ToggleMaximize();
+        else
+            Bridge.BeginDrag();
+    }
+
+    private void PopOutActive()
+    {
+        if (State.Active != null)
+            Popouts.Popout(State.Active);
+    }
+
+    // ------------------------------------------------------------------ rail
+
+    private RenderFragment RailItem(PaneDescriptor view, bool pinned) => __builder =>
+    {
+        bool active = State.Active == view.Id;
+        bool open = State.Open.Contains(view.Id);
+        string label = view.Label.Length > 9 ? view.Label[..8] + "…" : view.Label;
+
+        <button type="button"
+                class="rail-item @(active ? "active" : null) @(view.Kind == PaneKind.Setup ? "setup" : null)"
+                title="@view.Title"
+                @onclick="() => State.SelectView(view.Id)"
+                @onpointerdown="e => BeginPinDrag(e, view.Id)"
+                @oncontextmenu:preventDefault="true"
+                @oncontextmenu="e => ShowViewMenu(e, view.Id, true)">
+            <i class="@view.Icon"></i>
+            @if (State.Preferences.RailLabels)
+            {
+                <span>@label</span>
+            }
+            @if (open)
+            {
+                <span class="dot"></span>
+            }
+        </button>
+    };
+
+    /// <summary>
+    /// Close a tab on a middle click, anywhere on it.
+    /// </summary>
+    /// <remarks>
+    /// On the whole tab rather than on its x, which is the point of the gesture: the x is already one
+    /// click away and needs aiming. The button check follows <see cref="BeginTabDrag"/> - 1 is the
+    /// middle button, and every other press on a tab belongs to the drag or the menu.
+    ///
+    /// On mouseup rather than mousedown, so a mis-aimed press can still be dragged off the tab before it
+    /// counts, and because <c>onauxclick</c> is not one of the events Blazor binds.
+    /// </remarks>
+    private void MiddleClose(MouseEventArgs e, string viewId)
+    {
+        if (e.Button != 1)
+            return;
+
+        State.CloseView(viewId);
+    }
+
+    private void ShowViewMenu(MouseEventArgs e, string viewId, bool fromRail)
+    {
+        PaneDescriptor descriptor = State.Describe(viewId);
+        _ctx.ShowMenu(e.ClientX, e.ClientY, descriptor.Title,
+            descriptor.CanPin ? descriptor.Meta : "view", _ctx.ViewMenu(viewId, fromRail));
+    }
+
+    private void DismissMenu()
+    {
+        if (_ctx.Menu != null)
+        {
+            _ctx.CloseMenu();
+            StateHasChanged();
+        }
+    }
+
+    // ------------------------------------------------------------------ palette + hotkeys
+
+    private void OpenPalette()
+    {
+        _ctx.CloseMenu();
+        _paletteCursor = 0;
+        _paletteOpen = true;
+    }
+
+    private void ClosePalette()
+    {
+        _paletteOpen = false;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task OnHotkey(string key, bool shift)
+    {
+        switch (key)
+        {
+            case "palette":
+                if (_paletteOpen)
+                    _paletteOpen = false;
+                else
+                    OpenPalette();
+                break;
+
+            case "escape":
+                if (_paletteOpen)
+                    _paletteOpen = false;
+                else if (_ctx.Menu != null)
+                    _ctx.CloseMenu();
+                break;
+
+            case "enter":
+                if (_paletteOpen && _palette != null)
+                    await _palette.RunCurrent(shift);
+                else if (_ctx.Menu is { Cursor: >= 0 } menu)
+                {
+                    MenuItem item = menu.Items.ElementAtOrDefault(menu.Cursor);
+                    item?.Invoke();
+                }
+                break;
+
+            case "down":
+            case "up":
+                Move(key == "down" ? 1 : -1);
+                break;
+
+            default:
+                return;
+        }
+
+        StateHasChanged();
+    }
+
+    private void Move(int delta)
+    {
+        if (_paletteOpen && _palette != null)
+        {
+            // A search still pending would land after this move and put the cursor back on the first hit.
+            if (_palette.Settle())
+                _paletteCursor = 0;
+
+            int count = _palette.ResultCount;
+            if (count > 0)
+                _paletteCursor = (_paletteCursor + delta + count) % count;
+        }
+        else if (_ctx.Menu is { } menu && menu.Items.Count > 0)
+        {
+            menu.Cursor = (menu.Cursor + delta + menu.Items.Count) % menu.Items.Count;
+        }
+    }
+
+    [JSInvokable]
+    public void OnWindowBlur()
+    {
+        if (_ctx.Menu == null)
+            return;
+
+        _ctx.CloseMenu();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Set on teardown, so work still in flight knows there is nothing left to tell.</summary>
+    private bool _disposed;
+
+    public void Dispose()
+    {
+        _disposed = true;
+
+        State.Changed -= OnStateChanged;
+        Messenger.UnregisterAll(this);
+        _self?.Dispose();
+    }
+}

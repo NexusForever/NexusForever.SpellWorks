@@ -1,0 +1,57 @@
+/*
+ * Nocturne token layer - the single source of truth for colour, type and metrics.
+ * Never write a literal hex outside this file.
+ */
+:root {
+  /* grounds */
+  --bg:            #161826;
+  --chrome:        #1B1D2B;
+  --subbar:        #1A1C29;
+  --pane:          #20222F;
+  --pane-head:     #1E202E;
+  --raised:        #232532;
+  --raised-alt:    #252838;
+
+  /* lines */
+  --border:        #292B31;
+  --border-strong: #3F424D;
+  --border-focus:  #595D6C;
+
+  /* text */
+  --text:          #E9E9ED;
+  --text-mid:      #CFD3E5;
+  --text-label:    #B2B6CA;
+  --text-dim:      #9397AB;
+  --text-muted:    #75798C;
+  --text-faint:    #595D6C;
+  --text-disabled: #4A4D5A;
+
+  /* accent */
+  --accent:        #9184D9;
+  --accent-icon:   #968AE0;
+  --accent-deep:   #796CBF;
+  --accent-text:   #D2CEFD;
+  --accent-link:   #B5ABFC;
+  --accent-tint:   #2B2741;
+  --accent-tint-2: #423A6A;
+  --accent-border: #5D5294;
+
+  /* misc */
+  --row-rule:      rgb(233 233 237 / .055);
+  --selection:     rgb(145 132 217 / .35);
+  --scrim:         rgb(10 11 19 / .62);
+  --elev:          0 16px 40px rgb(0 0 0 / .65);
+
+  --font-ui:       'Inter', system-ui, sans-serif;
+  --font-mono:     'JetBrains Mono', ui-monospace, monospace;
+
+  /* fixed metrics */
+  --h-header:      42px;
+  --h-tabstrip:    40px;
+  --h-tab:         30px;
+  --h-pane-head:   38px;
+  --h-subtabs:     34px;
+  --h-footer:      24px;
+  --w-rail:        70px;
+  --h-row:         26px;
+}

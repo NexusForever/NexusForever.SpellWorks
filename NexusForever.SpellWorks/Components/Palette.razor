@@ -1,0 +1,130 @@
+@implements IDisposable
+
+<div class="scrim fade" @onmousedown="() => Closed.InvokeAsync()">
+    <div class="palette" @onmousedown:stopPropagation="true">
+        <div class="palette-input">
+            <i class="ph ph-magnifying-glass"></i>
+            <input @ref="_input"
+                   value="@Query"
+                   @oninput="OnInput"
+                   placeholder="Jump to a view, game table or spell…" />
+            <span class="kbd">ESC</span>
+        </div>
+
+        <div class="palette-results">
+            @for (int i = 0; i < _results.Count; i++)
+            {
+                PaletteEntry entry = _results[i];
+                int index = i;
+                <button type="button"
+                        class="palette-result @(Cursor == index ? "cursor" : null)"
+                        @onclick="e => Run(entry, e.ShiftKey)"
+                        @onmouseenter="() => CursorChanged.InvokeAsync(index)">
+                    <i class="@entry.Icon"></i>
+                    <span class="label">@entry.Label</span>
+                    <span class="sub">@entry.Sub</span>
+                    <span class="pill">@entry.Kind</span>
+                </button>
+            }
+
+            @if (_results.Count == 0)
+            {
+                <div class="palette-none">Nothing matches &ldquo;@Query&rdquo;</div>
+            }
+        </div>
+
+        <div class="palette-hints">
+            <span>enter — open</span><span>shift+enter — pop out</span><span>⌘K / ctrl+K — toggle</span>
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public ShellContext Ctx { get; set; }
+
+    [Parameter] public PaletteIndex Index { get; set; }
+    [Parameter] public int Cursor { get; set; }
+    [Parameter] public EventCallback<int> CursorChanged { get; set; }
+    [Parameter] public EventCallback Closed { get; set; }
+
+    public string Query { get; private set; } = "";
+
+    private ElementReference _input;
+    private List<PaletteEntry> _results = [];
+
+    // Same 150 ms pause as the grid; the match itself runs off the render thread.
+    private readonly Debounce _debounce = new(TimeSpan.FromMilliseconds(150));
+
+    protected override void OnInitialized() => _results = Index.Search("");
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Ctx?.Js != null)
+            await Ctx.Js.InvokeVoidAsync("focus", _input);
+    }
+
+    /// <summary>The top hit, or the one under the keyboard cursor.</summary>
+    public PaletteEntry Current => _results.ElementAtOrDefault(Cursor < 0 ? 0 : Cursor);
+
+    public int ResultCount => _results.Count;
+
+    /// <summary>The query <see cref="_results"/> answers. Behind <see cref="Query"/> while a search is pending.</summary>
+    private string _searched = "";
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        string query = Query = e.Value?.ToString() ?? "";
+
+        await _debounce.Run(
+            token => Task.Run(() => Index.Search(query), token),
+            async results =>
+            {
+                _results = results;
+                _searched = query;
+                await CursorChanged.InvokeAsync(0);
+                StateHasChanged();
+            });
+    }
+
+    /// <summary>
+    /// Bring the results up to date with what has been typed, now rather than after the debounce.
+    /// Returns whether they changed - the cursor then points into a list that is gone.
+    /// </summary>
+    /// <remarks>
+    /// The keyboard does not wait out the debounce. Without this, Enter or an arrow inside those 150 ms
+    /// would act on the previous query's results: Enter would open a hit the user has typed past, and an
+    /// arrow would move over a list the landing search then replaces, resetting the cursor. The search is
+    /// synchronous here - at most <see cref="PaletteIndex.MaxResults"/> hits over an index already built -
+    /// and the pending one is cancelled so it cannot land afterwards.
+    /// </remarks>
+    public bool Settle()
+    {
+        if (_searched == Query)
+            return false;
+
+        _debounce.Cancel();
+        _results = Index.Search(Query);
+        _searched = Query;
+        return true;
+    }
+
+    /// <summary>Open the hit the keyboard is on, as of what has been typed.</summary>
+    public Task RunCurrent(bool popout) => Run(Settle() ? _results.FirstOrDefault() : Current, popout);
+
+    public async Task Run(PaletteEntry entry, bool popout)
+    {
+        if (entry == null)
+            return;
+
+        await Closed.InvokeAsync();
+
+        if (entry.Kind == "spell")
+            Ctx.OpenDetail(entry.SpellId, null, popout);
+        else if (entry.Kind == "effecttype" && entry.EffectType is { } type)
+            Ctx.OpenEffectTypeSpells(type, popout);
+        else
+            Ctx.Open(entry.ViewId, popout);
+    }
+
+    public void Dispose() => _debounce.Dispose();
+}

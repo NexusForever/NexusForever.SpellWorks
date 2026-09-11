@@ -1,0 +1,432 @@
+@using System.Globalization
+
+<div class="setup-body">
+    <div class="setup-title">Client &amp; archive setup</div>
+    <div class="setup-lede">
+        Point SpellWorks at a WildStar installation. The patch folder holds
+        <span class="mono">ClientData.archive</span>, from which the Spell4 game tables are read.
+    </div>
+
+    <div class="setup-card">
+        <div class="group-head">
+            <span class="tick"></span>
+            <span class="group-title">Patch path</span>
+            <div class="flex"></div>
+            <span class="state-badge @BadgeClass">@StateText</span>
+        </div>
+
+        <div class="path-row">
+            <div class="path-field @(Dirty ? "dirty" : null)">
+                <i class="ph ph-folder-open"></i>
+                <input value="@Draft" @onchange="OnPathChanged" placeholder="C:\Program Files (x86)\WildStar\Patch" />
+            </div>
+            <button type="button" class="browse-btn" @onclick="ToggleBrowse">
+                <i class="ph ph-folders"></i>Browse…
+            </button>
+        </div>
+
+        <div class="path-hint">Expects ClientData.archive + ClientData.index in this folder.</div>
+
+        @if (Problem != null)
+        {
+            <div class="setup-problem">
+                <i class="ph ph-warning"></i>
+                <span>@Problem</span>
+            </div>
+        }
+
+        @if (Ctx.State.IsBrowsing)
+        {
+            <div style="margin-top:10px;border:1px solid var(--border-strong);border-radius:7px;overflow:hidden">
+                <div style="padding:6px 11px;background:var(--raised-alt);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-label);font-weight:600">
+                    Detected installations
+                </div>
+
+                @foreach (InstallationCandidate candidate in _candidates)
+                {
+                    <button type="button" class="candidate" @onclick="() => Pick(candidate.Path)">
+                        <i class="@candidate.Icon"></i>
+                        <span class="mono path">@candidate.Path</span>
+                        <span class="note">@candidate.Note</span>
+                    </button>
+                }
+
+                <button type="button" class="candidate" @onclick="PickFolder">
+                    <i class="ph ph-folder-open"></i>
+                    <span class="mono path">Choose a folder…</span>
+                    <span class="note">@(_candidates.Count == 0 ? "nothing detected" : "")</span>
+                </button>
+            </div>
+        }
+
+        <div class="setup-foot">
+            <button type="button" class="apply-path-btn @(Dirty ? "dirty" : null) @(Busy ? "busy" : null)" @onclick="Apply">
+                <i class="ph ph-arrows-clockwise"></i>@ApplyText
+            </button>
+            <button type="button" class="revert-btn" @onclick="Revert">Revert</button>
+            <span class="note">
+                Written to <span class="mono">Configuration.json</span> as <span class="mono">PatchPath</span>
+            </span>
+        </div>
+    </div>
+
+    <div class="setup-cards">
+        <div class="setup-card">
+            <div class="group-head">
+                <span class="tick"></span>
+                <span class="group-title">Archive</span>
+            </div>
+            <div class="setup-rows">
+                @foreach ((string key, string value) in ArchiveRows())
+                {
+                    <div class="kv">
+                        <span class="kv-key">@key</span>
+                        <span class="kv-value" title="@value">@value</span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="setup-card">
+            <div class="group-head">
+                <span class="tick"></span>
+                <span class="group-title">Preferences</span>
+            </div>
+            <div class="fields">
+                <label class="field wide">
+                    <span class="label">Locale</span>
+                    <select @key="LocaleKey" value="@CurrentLocale"
+                            @onchange="e => SetLocale(e.Value?.ToString())">
+                        @foreach (string locale in Locales)
+                        {
+                            <option value="@locale" selected="@(locale == CurrentLocale)">@locale</option>
+                        }
+                    </select>
+                </label>
+
+                @foreach ((string label, Func<bool> get, Action<bool> set) in PreferenceToggles())
+                {
+                    <label class="field wide">
+                        <span class="label">@label</span>
+                        <button type="button" class="toggle @(get() ? "on" : null)"
+                                @onclick="() => SetPreference(() => set(!get()))">@(get() ? "on" : "off")</button>
+                    </label>
+                }
+
+                @* A number, not a toggle: a filter on a float column compares with slack, and an epsilon
+                   nobody can see is one nobody can trust. *@
+                <label class="field wide" data-field="epsilon">
+                    <span class="label">Float compare epsilon</span>
+                    <input class="epsilon mono @(_epsilonDraft != null ? "invalid" : null)"
+                           value="@EpsilonText" @onchange="OnEpsilonChanged"
+                           title="How close a float or double column has to be to the value typed to count as equal to it - relative to the larger of the two, so it holds at any magnitude. 0 demands the bit pattern itself." />
+                </label>
+
+                <div class="setup-foot">
+                    <button type="button" class="revert-btn clear-promoted" @onclick="ClearPromoted"
+                            disabled="@(PromotedCount == 0)">Clear promoted flex filters</button>
+                    <span class="note promoted-count">@PromotedCount promoted across all panes</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .candidate {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        width: 100%;
+        padding: 7px 11px;
+        background: transparent;
+        border: 0;
+        border-top: 1px solid var(--border);
+        color: var(--text-mid);
+        font-size: 11px;
+        text-align: left;
+    }
+
+    .setup-problem {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 9px;
+        padding: 8px 11px;
+        border: 1px solid var(--danger-border, var(--border-strong));
+        border-radius: 7px;
+        background: var(--danger-tint, var(--raised-alt));
+        color: var(--text-mid);
+        font-size: 11px;
+        line-height: 1.45;
+    }
+
+    .setup-problem i { flex: none; margin-top: 1px; font-size: 14px; color: var(--danger-text, var(--accent-icon)); }
+
+    .candidate:hover { background: var(--accent-tint); color: var(--accent-text); }
+    .candidate i { font-size: 14px; color: var(--accent-icon); }
+    .candidate .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .candidate .note { font-size: 9.5px; color: var(--text-muted); white-space: nowrap; }
+</style>
+
+@code {
+    [CascadingParameter] public ShellContext Ctx { get; set; }
+
+    [Parameter] public EventCallback Reloaded { get; set; }
+
+    private Preferences Prefs => Ctx.State.Preferences;
+
+    private IReadOnlyList<InstallationCandidate> _candidates = [];
+    private bool _browsing;
+
+    /// <summary>
+    /// What went wrong, in the user's words rather than a state badge. The engine records the reason a load
+    /// failed; without it on screen, a wrong path looks like an empty client.
+    /// </summary>
+    private string Problem => Ctx.State.ConfigurationError ?? Ctx.Engine.Error;
+
+    /// <summary>
+    /// The browse list can be opened from here or by the shell after a failed load, so the candidates are
+    /// detected when the flag turns on rather than inside the click that turns it on.
+    /// </summary>
+    protected override void OnParametersSet() => SyncBrowse();
+
+    private void SyncBrowse()
+    {
+        if (Ctx.State.IsBrowsing == _browsing)
+            return;
+
+        _browsing = Ctx.State.IsBrowsing;
+
+        if (_browsing)
+            _candidates = Ctx.Probe.Detect();
+    }
+
+    private string Draft => Ctx.State.PathDraft ?? Ctx.Engine.PatchPath ?? "";
+
+    private bool Dirty => !string.Equals(Draft, Ctx.Engine.PatchPath, StringComparison.OrdinalIgnoreCase);
+
+    private bool Busy => Ctx.Engine.State == EngineState.Loading;
+
+    private bool Valid => Ctx.Probe.IsPatchFolder(Draft);
+
+    private string StateText => Busy
+        ? "reading archive…"
+        : Dirty
+            ? Valid ? "unsaved change" : "no archive found here"
+            : Ctx.Engine.State == EngineState.Ready ? "archive mounted" : "no archive mounted";
+
+    private string BadgeClass => Busy ? null : Dirty ? Valid ? "dirty" : "invalid" : null;
+
+    private string ApplyText => Busy
+        ? "Reloading game tables…"
+        : Dirty ? "Save & reload tables" : "Reload game tables";
+
+    private void OnPathChanged(ChangeEventArgs e)
+    {
+        Ctx.State.PathDraft = e.Value?.ToString() ?? "";
+        Ctx.State.Notify();
+    }
+
+    private void ToggleBrowse()
+    {
+        Ctx.State.IsBrowsing = !Ctx.State.IsBrowsing;
+
+        SyncBrowse();
+        Ctx.State.Notify();
+    }
+
+    private void Pick(string path)
+    {
+        Ctx.State.PathDraft = path;
+        Ctx.State.IsBrowsing = false;
+        Ctx.State.Notify();
+    }
+
+    /// <summary>
+    /// A real folder picker. <c>&lt;input type="file" webkitdirectory&gt;</c> would copy the whole tree into
+    /// the WebView, which is not what "choose a folder" means here.
+    /// </summary>
+    private void PickFolder()
+    {
+        string folder = Ctx.FolderPicker.Pick("Select the WildStar patch folder", Draft);
+
+        if (folder != null)
+            Pick(folder);
+    }
+
+    private void Revert()
+    {
+        Ctx.State.PathDraft = Ctx.Engine.PatchPath;
+        Ctx.State.IsBrowsing = false;
+        Ctx.State.Notify();
+    }
+
+    private async Task Apply()
+    {
+        if (Busy)
+            return;
+
+        string path = Draft;
+
+        Ctx.State.IsBrowsing = false;
+        Ctx.Store.SavePatchPath(path);
+
+        await Reloaded.InvokeAsync();
+    }
+
+    private List<(string, string)> ArchiveRows()
+    {
+        ArchiveInfo info = Ctx.Engine.Info;
+
+        if (info == null)
+        {
+            return
+            [
+                ("Archive", Ctx.Engine.State == EngineState.Failed ? "failed to read" : "not loaded"),
+                ("Tables loaded", "0"),
+                ("Text table", "—"),
+                ("Last read", "never")
+            ];
+        }
+
+        return
+        [
+            ("Archive", info.ArchiveName ?? "—"),
+            ("Tables loaded", $"{info.TableCount} / {info.TableCount}"),
+            ("Text table", info.TextTableName == null ? "—" : $"{info.TextTableName} · {info.TextEntryCount:n0} strings"),
+            ("Last read", info.LastRead.ToLocalTime().ToString("HH:mm:ss"))
+        ];
+    }
+
+    /// <summary>
+    /// What was typed into the epsilon box and rejected, or null when the box reads the value in use.
+    /// </summary>
+    /// <remarks>
+    /// Kept and marked rather than discarded, which is the stance the filter form takes on a value that
+    /// does not parse: a number that vanished on its way in is one the user cannot see to correct.
+    /// </remarks>
+    private string _epsilonDraft;
+
+    /// <summary>
+    /// The epsilon as the box shows it - the rejected draft if there is one, otherwise the value in use,
+    /// printed in the invariant culture so it reads back as the file holds it rather than as the machine's
+    /// locale would write it.
+    /// </summary>
+    private string EpsilonText => _epsilonDraft ?? Prefs.FilterEpsilon.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Read a new tolerance out of the box.
+    /// </summary>
+    /// <remarks>
+    /// Anything that is not a distance - unreadable, or negative - leaves the one in use alone rather than
+    /// being coerced into something the user did not ask for: a tolerance is the one setting whose wrong
+    /// value quietly widens every filter that reads it.
+    /// </remarks>
+    private void OnEpsilonChanged(ChangeEventArgs e)
+    {
+        string typed = e.Value?.ToString() ?? "";
+
+        if (!double.TryParse(typed, NumberStyles.Float, CultureInfo.InvariantCulture, out double epsilon)
+            // Not finite includes infinity, which "Infinity" and "1e400" both parse to - and which JSON
+            // cannot hold, so accepting it would make every save of the workspace throw.
+            || !double.IsFinite(epsilon) || epsilon < 0)
+        {
+            _epsilonDraft = typed;
+            Ctx.State.Notify();
+            return;
+        }
+
+        _epsilonDraft = null;
+        SetPreference(() => Prefs.FilterEpsilon = epsilon);
+    }
+
+    private List<(string, Func<bool>, Action<bool>)> PreferenceToggles() =>
+    [
+        ("Load on start", () => Prefs.LoadOnStart, v => Prefs.LoadOnStart = v),
+        ("Restore windows", () => Prefs.RestoreWindows, v => Prefs.RestoreWindows = v),
+        ("Monospace ids", () => Prefs.MonospaceIds, v => Prefs.MonospaceIds = v),
+        ("Rail labels", () => Prefs.RailLabels, v => Prefs.RailLabels = v),
+
+        // Appended rather than inserted: the order is what the form draws, and a preference that moves
+        // is one every reader has to find again.
+        ("Persist filters on start", () => Prefs.RestoreFilters, v => Prefs.RestoreFilters = v),
+        ("Persist promoted flex filters", () => Prefs.RestorePromoted, v => Prefs.RestorePromoted = v)
+    ];
+
+    /// <summary>
+    /// Forget every promoted flex column, on every pane.
+    /// </summary>
+    /// <remarks>
+    /// The filters themselves are cleared from the form they belong to, one pane at a time. Promotions
+    /// are not: they are the shape of that form rather than a constraint in it, so the only place they
+    /// can all be dropped at once is here.
+    ///
+    /// Conditions are left alone. A promoted column's constraints are ordinary conditions on an ordinary
+    /// key, so they come back under the column picker rather than disappearing with the promotion.
+    /// </remarks>
+    private void ClearPromoted()
+    {
+        SetPreference(() =>
+        {
+            foreach (PaneState pane in Ctx.State.PaneStates.Values)
+                pane.Promoted.Clear();
+        });
+    }
+
+    private int PromotedCount => Ctx.State.PaneStates.Values.Sum(pane => pane.Promoted.Count);
+
+    /// <summary>
+    /// Only the locales actually present in the mounted archives - a locale with no text table would
+    /// silently show nothing.
+    /// </summary>
+    private IReadOnlyList<string> Locales
+    {
+        get
+        {
+            IReadOnlyList<string> available = Ctx.Text.AvailableLocales;
+            return available.Count > 0 ? available : [Prefs.Locale];
+        }
+    }
+
+    /// <summary>
+    /// The locale the dropdown shows as current. Normally the preference, but the preference may name a
+    /// locale the mounted archives do not carry - and the text service then reads from another one. Showing
+    /// what is really being read keeps the dropdown from offering a choice that cannot be made: a select
+    /// raises no change event for the entry it already shows, so an entry shown wrongly is an entry the
+    /// user cannot pick.
+    /// </summary>
+    private string CurrentLocale
+    {
+        get
+        {
+            IReadOnlyList<string> locales = Locales;
+            return locales.Contains(Prefs.Locale) ? Prefs.Locale : locales[0];
+        }
+    }
+
+    /// <summary>
+    /// Identity of the dropdown, which changes with the locales on offer.
+    /// </summary>
+    /// <remarks>
+    /// A load rebuilds the option list - before one there is only the remembered locale to offer, after it
+    /// there is whatever the archives carry. Editing the options of a live select leaves the browser
+    /// showing the option that happens to sit where the selected one did, and nothing re-applies the
+    /// element's value, because the value itself did not change. Keying the element on the list makes the
+    /// rebuild a new select rather than an edited one, so it is selected from its markup like any other.
+    /// </remarks>
+    private string LocaleKey => string.Join(' ', Locales);
+
+    private void SetLocale(string locale)
+    {
+        Ctx.Text.Locale = locale;
+        SetPreference(() => Prefs.Locale = locale);
+    }
+
+    private void SetPreference(Action mutate)
+    {
+        mutate();
+        Ctx.Store.Save();
+        Ctx.State.Notify();
+    }
+}

@@ -1,0 +1,166 @@
+@using NexusForever.Game.Static.Spell
+@* One pane: identical whether it sits in a tab, a split panel or a pop-out window. *@
+
+@* In a pop-out the window's own title bar carries the icon, title, meta and Data/Filter control. *@
+@if (!Ctx.IsPopout)
+{
+    @* The header is what a view has instead of a tab in a split layout, and its x is the only way to
+       close one there - so it answers the same middle click the tab strip does. *@
+    <div class="pane-head" @onmouseup="MiddleClose">
+        <i class="@Descriptor.Icon"></i>
+        <span class="pane-title" title="@Descriptor.Title">@Descriptor.Title</span>
+        <span class="pane-meta" title="@Meta">@Meta</span>
+        <div class="pane-flex"></div>
+
+        @if (Descriptor.Kind != PaneKind.Setup)
+        {
+            <div class="segmented">
+                <button type="button" class="@(PaneModel.Mode == PaneMode.Rows ? "on" : null)" @onclick="() => SetMode(PaneMode.Rows)">Data</button>
+                <button type="button" class="@(PaneModel.Mode == PaneMode.Filter ? "on" : null)" @onclick="() => SetMode(PaneMode.Filter)">
+                    Filter
+                    @if (FilterCount > 0)
+                    {
+                        <span class="badge">@FilterCount</span>
+                    }
+                </button>
+            </div>
+        }
+
+        <button type="button" class="icon-btn" title="Pop out as window" @onclick="() => Ctx.Popouts.Popout(Descriptor.Id)">
+            <i class="ph ph-arrow-square-out"></i>
+        </button>
+        <button type="button" class="icon-btn" title="Close view" @onclick="() => Ctx.State.CloseView(Descriptor.Id)">
+            <i class="ph ph-x"></i>
+        </button>
+    </div>
+}
+
+@if (Descriptor.Kind == PaneKind.Detail && PaneModel.Mode == PaneMode.Rows)
+{
+    <div class="subtabs">
+        @foreach (DetailSubTab tab in Enum.GetValues<DetailSubTab>())
+        {
+            <button type="button" class="subtab @(PaneModel.SubTab == tab ? "active" : null)" @onclick="() => SetSubTab(tab)">@tab</button>
+        }
+        <div class="pane-flex"></div>
+        <span class="meta">@SubMeta</span>
+        <button type="button" class="icon-btn" title="Back to previously viewed spell"
+                disabled="@(Ctx.State.History.Count == 0)" @onclick="() => Ctx.State.Back()">
+            <i class="ph ph-arrow-u-up-left"></i>
+        </button>
+        <button type="button" class="icon-btn @(PaneModel.LockedSpellId.HasValue ? "on" : null)"
+                title="Lock this pane to the current spell" @onclick="() => Ctx.State.ToggleLock(Scope)">
+            <i class="@(PaneModel.LockedSpellId.HasValue ? "ph ph-lock" : "ph ph-lock-open")"></i>
+        </button>
+    </div>
+}
+
+@if (Descriptor.Kind == PaneKind.EffectTypeSpells && PaneModel.Mode == PaneMode.Rows)
+{
+    @* No sub-tabs here - the pane is one grid - but the same lock affordance, so a type can be held while
+       the browser keeps navigating. *@
+    <div class="subtabs">
+        <span class="meta">@EffectTypeMeta</span>
+        <div class="pane-flex"></div>
+        <button type="button" class="icon-btn @(PaneModel.LockedEffectType.HasValue ? "on" : null)"
+                title="Lock this pane to the current effect type" @onclick="() => Ctx.State.ToggleEffectTypeLock(Scope)">
+            <i class="@(PaneModel.LockedEffectType.HasValue ? "ph ph-lock" : "ph ph-lock-open")"></i>
+        </button>
+    </div>
+}
+
+@if (Descriptor.Kind == PaneKind.Setup)
+{
+    <SetupView Reloaded="Reload" />
+}
+else if (PaneModel.Mode == PaneMode.Filter)
+{
+    <FilterView Descriptor="Descriptor" Pane="PaneModel" SpellId="SpellId"
+                EffectType="EffectType" Applied="OnFilterApplied" />
+}
+else if (Descriptor.Kind == PaneKind.Detail)
+{
+    <DetailView Scope="@Scope" Pane="PaneModel" SpellId="SpellId" Generation="Generation" />
+}
+else
+{
+    <TableView Descriptor="Descriptor" Scope="@Scope" Pane="PaneModel" SpellId="SpellId"
+               EffectType="EffectType" Generation="Generation" />
+}
+
+@code {
+    [CascadingParameter] public ShellContext Ctx { get; set; }
+
+    /// <summary>
+    /// Close this view on a middle click of its header, as the tab strip closes a tab.
+    /// </summary>
+    /// <remarks>
+    /// By <c>Descriptor.Id</c> rather than <c>Scope</c>, as the header's own x is: a pop-out's scope is
+    /// its window key, and the header is not drawn there at all.
+    /// </remarks>
+    private void MiddleClose(MouseEventArgs e)
+    {
+        if (e.Button != 1)
+            return;
+
+        Ctx.State.CloseView(Descriptor.Id);
+    }
+
+    [Parameter] public PaneDescriptor Descriptor { get; set; }
+
+    /// <summary>Per-pane state key: the view id in the main window, the pop-out key in a pop-out.</summary>
+    [Parameter] public string Scope { get; set; }
+
+    [Parameter] public int Generation { get; set; }
+    [Parameter] public EventCallback ReloadRequested { get; set; }
+
+    private PaneState PaneModel => Ctx.State.PaneStateFor(Scope);
+
+    private uint SpellId => Ctx.State.SelectedIn(Scope);
+
+    private SpellEffectType? EffectType => Ctx.State.EffectTypeIn(Scope);
+
+    private string EffectTypeMeta
+    {
+        get
+        {
+            if (EffectType is not { } type)
+                return "no effect type selected";
+
+            return Ctx.Models.EffectTypeUsages.TryGetValue(type, out EffectTypeUsage usage)
+                ? $"{type} · {usage.SpellIds.Count:n0} spells · {usage.EffectRowCount:n0} effect rows"
+                : $"{type} · unused";
+        }
+    }
+
+    private int FilterCount => Ctx.FilterCount(Scope, Descriptor);
+
+    private string Meta => Descriptor.Kind == PaneKind.Setup ? Ctx.Engine.PatchPath : Descriptor.Meta;
+
+    private string SubMeta
+    {
+        get
+        {
+            ISpellModel spell = Ctx.State.Spell(SpellId);
+            return spell == null
+                ? "no spell selected"
+                : $"Spell4Effects · {spell.Effects.Count} effects";
+        }
+    }
+
+    private void SetMode(PaneMode mode)
+    {
+        PaneModel.Mode = mode;
+        Ctx.State.Notify();
+    }
+
+    private void SetSubTab(DetailSubTab tab)
+    {
+        PaneModel.SubTab = tab;
+        Ctx.State.Notify();
+    }
+
+    private void OnFilterApplied() => Ctx.State.Notify();
+
+    private Task Reload() => ReloadRequested.InvokeAsync();
+}
